@@ -1,12 +1,13 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { Link } from 'expo-router';
+import { Link, Redirect, router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Platform, Pressable, RefreshControl, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BarraProgresso } from '@/components/BarraProgresso';
 import { Cartao } from '@/components/Cartao';
 import { Selo } from '@/components/Selo';
+import { StatusEnvio } from '@/components/StatusEnvio';
 import { Texto } from '@/components/Texto';
 import { useAvaliacao } from '@/context/AvaliacaoContext';
 import { proximoPendente, type ItemFila } from '@/lib/avaliacao';
@@ -21,7 +22,7 @@ const filtros: { valor: Filtro; rotulo: string }[] = [
 ];
 
 function iniciais(nome: string): string {
-  const partes = nome.trim().split(/\s+/);
+  const partes = nome.trim().split(/[\s@.]+/);
   const primeira = partes[0]?.[0] ?? '';
   const ultima = partes.length > 1 ? partes[partes.length - 1][0] : '';
 
@@ -29,14 +30,17 @@ function iniciais(nome: string): string {
 }
 
 /**
- * A fila de avaliação: os projetos enviados por grupos que o avaliador não
+ * A fila de avaliação: os projetos da feira menos os grupos que o avaliador
  * orienta. No celular do site a lista e a ficha já eram duas telas; aqui
  * também — tocar em um grupo abre a ficha dele.
+ *
+ * A fila vem do tablet (os projetos já vêm no APK), e não do servidor. Por
+ * isso ela abre igual com ou sem internet.
  */
 export default function FilaDeAvaliacao() {
-  const { avaliador, fila, carregando, erro, recarregar } = useAvaliacao();
-  const [filtro, setFiltro] = useState<Filtro>('todos');
+  const { pronto, email, nome, fila, pacoteGeradoEm, prontasParaEnviar, online, atualizarProjetos, liberar } = useAvaliacao();
   const [atualizando, setAtualizando] = useState(false);
+  const [filtro, setFiltro] = useState<Filtro>('todos');
   const { top, bottom } = useSafeAreaInsets();
   const paleta = usePaleta();
 
@@ -55,19 +59,46 @@ export default function FilaDeAvaliacao() {
     [fila, filtro]
   );
 
-  const puxarParaAtualizar = async () => {
-    setAtualizando(true);
-    await recarregar();
-    setAtualizando(false);
-  };
-
-  if (carregando) {
+  if (!pronto) {
     return (
       <View className="flex-1 items-center justify-center bg-surface">
         <ActivityIndicator color={paleta.primary} size="large" />
       </View>
     );
   }
+
+  if (!email) {
+    return <Redirect href="/identificacao" />;
+  }
+
+  // Liberar apaga as avaliações do tablet: se alguma não foi enviada, ela se perde.
+  const confirmarLiberacao = () => {
+    const rascunhos = fila.filter((item) => item.situacao === 'em_avaliacao').length;
+    const naoEnviadas = prontasParaEnviar + rascunhos;
+    const perda =
+      naoEnviadas > 0
+        ? `Atenção: ${naoEnviadas === 1 ? '1 avaliação deste tablet ainda não foi enviada e será perdida' : `${naoEnviadas} avaliações deste tablet ainda não foram enviadas e serão perdidas`}.`
+        : 'As avaliações já foram enviadas. O tablet volta para a tela do e-mail, com os mesmos projetos.';
+    const executar = () => liberar().then(() => router.replace('/identificacao'));
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Liberar o tablet para outro avaliador? ${perda}`)) {
+        executar();
+      }
+      return;
+    }
+
+    Alert.alert('Liberar para outro avaliador?', perda, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Liberar', style: naoEnviadas > 0 ? 'destructive' : 'default', onPress: executar },
+    ]);
+  };
+
+  const puxarParaAtualizar = async () => {
+    setAtualizando(true);
+    await atualizarProjetos();
+    setAtualizando(false);
+  };
 
   const cabecalho = (
     <View className="gap-stack-md mb-stack-sm">
@@ -76,43 +107,53 @@ export default function FilaDeAvaliacao() {
           Avaliar grupos
         </Texto>
         <Texto className="text-body-md text-on-surface-variant mt-1">
-          Projetos já enviados por grupos que você não orienta. Marque os cinco critérios e finalize para registrar a nota.
+          Os projetos da feira, menos os grupos que você orienta. Marque os cinco critérios e finalize cada grupo.
         </Texto>
       </View>
 
-      {erro && (
-        <View className="rounded-2xl bg-error-container p-4">
-          <Texto className="text-body-sm text-on-error-container">{erro}</Texto>
-        </View>
-      )}
+      <StatusEnvio aoLiberar={confirmarLiberacao} />
 
       {/* AVALIADOR */}
-      {avaliador && (
-        <Cartao className="gap-3">
+      <Cartao className="gap-3">
+        <View className="flex-row items-center justify-between">
           <Texto peso="medium" className="text-label-sm text-on-surface-variant uppercase tracking-wider">
             Avaliador
           </Texto>
-          <View className="flex-row items-center gap-3">
-            <View className="w-11 h-11 rounded-full bg-primary/10 items-center justify-center">
-              <Texto peso="bold" className="text-body-md text-primary">
-                {iniciais(avaliador.nome)}
+          <View className="flex-row gap-4">
+            <Pressable accessibilityRole="button" className="flex-row items-center gap-1 py-1" hitSlop={8} onPress={() => router.push('/identificacao')}>
+              <MaterialIcons color={paleta.primary} name="edit" size={16} />
+              <Texto peso="medium" className="text-label-sm text-primary">
+                Corrigir e-mail
               </Texto>
-            </View>
-            <View className="flex-1 min-w-0">
-              <Texto peso="medium" className="text-label-md text-on-surface" numberOfLines={1}>
-                {avaliador.nome}
+            </Pressable>
+            <Pressable accessibilityRole="button" className="flex-row items-center gap-1 py-1" hitSlop={8} onPress={confirmarLiberacao}>
+              <MaterialIcons color={paleta.outline} name="swap-horiz" size={16} />
+              <Texto peso="medium" className="text-label-sm text-outline">
+                Trocar avaliador
               </Texto>
-              <Texto className="text-label-sm text-outline" numberOfLines={1}>
-                {avaliador.email}
-              </Texto>
-            </View>
+            </Pressable>
           </View>
-          <Texto className="text-body-sm text-on-surface-variant pt-3 border-t border-outline-variant">
-            {fila.length} {fila.length === 1 ? 'grupo na fila' : 'grupos na fila'} · {totalAvaliados}{' '}
-            {totalAvaliados === 1 ? 'avaliado' : 'avaliados'}
-          </Texto>
-        </Cartao>
-      )}
+        </View>
+        <View className="flex-row items-center gap-3">
+          <View className="w-11 h-11 rounded-full bg-primary/10 items-center justify-center">
+            <Texto peso="bold" className="text-body-md text-primary">
+              {iniciais(nome ?? email)}
+            </Texto>
+          </View>
+          <View className="flex-1 min-w-0">
+            <Texto peso="medium" className="text-label-md text-on-surface" numberOfLines={1}>
+              {nome ?? email}
+            </Texto>
+            <Texto className="text-label-sm text-outline" numberOfLines={1}>
+              {nome ? email : 'O e-mail é conferido no envio'}
+            </Texto>
+          </View>
+        </View>
+        <Texto className="text-body-sm text-on-surface-variant pt-3 border-t border-outline-variant">
+          {fila.length} {fila.length === 1 ? 'grupo na fila' : 'grupos na fila'} · {totalAvaliados}{' '}
+          {totalAvaliados === 1 ? 'avaliado' : 'avaliados'}
+        </Texto>
+      </Cartao>
 
       {fila.length > 0 && (
         <Cartao className="gap-4">
@@ -167,18 +208,23 @@ export default function FilaDeAvaliacao() {
   return (
     <FlatList
       className="flex-1 bg-surface"
-      contentContainerStyle={{ paddingTop: top + 16, paddingBottom: bottom + 24, paddingHorizontal: 16, gap: 8 }}
+      // No tablet a lista não se estica de borda a borda: fica numa coluna legível.
+      contentContainerStyle={{ paddingTop: top + 16, paddingBottom: bottom + 24, paddingHorizontal: 16, gap: 8, width: '100%', maxWidth: 760, alignSelf: 'center' }}
       data={fila.length > 0 ? visiveis : []}
       keyExtractor={(item) => item.projeto.uuid}
       ListEmptyComponent={
         fila.length === 0 ? (
           <Cartao className="items-center">
-            <MaterialIcons color={paleta['on-surface-variant']} name="task-alt" size={40} />
+            <MaterialIcons color={paleta['on-surface-variant']} name={pacoteGeradoEm ? 'task-alt' : 'cloud-download'} size={40} />
             <Texto peso="bold" className="text-body-md text-on-surface mt-2 text-center">
-              Nenhum projeto para avaliar no momento
+              {pacoteGeradoEm ? 'Nenhum projeto para avaliar' : 'Este tablet está sem os projetos da feira'}
             </Texto>
             <Texto className="text-body-sm text-on-surface-variant mt-1 text-center">
-              Quando um grupo que você não orienta enviar o projeto, ele entra na sua fila aqui.
+              {pacoteGeradoEm
+                ? 'Não há projeto enviado numa feira em andamento, fora os grupos que você orienta.'
+                : online
+                  ? 'Puxe a tela para baixo para baixar os projetos do servidor.'
+                  : 'Conecte o tablet à internet ou instale o APK gerado com os projetos.'}
             </Texto>
           </Cartao>
         ) : (
@@ -198,13 +244,14 @@ export default function FilaDeAvaliacao() {
 }
 
 function GrupoDaFila({ item }: { item: ItemFila }) {
+  const paleta = usePaleta();
   const detalhes = [item.projeto.categoria, item.projeto.evento_nome].filter(Boolean).join(' · ');
 
   return (
     <Link asChild href={`/avaliacao/${item.projeto.uuid}`}>
       <Pressable
         accessibilityHint="Abre a ficha de avaliação deste grupo"
-        className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 active:border-primary active:bg-primary/5"
+        className={`rounded-2xl border bg-surface-container-lowest p-4 active:border-primary active:bg-primary/5 ${item.aviso ? 'border-error' : 'border-outline-variant'}`}
       >
         <View className="flex-row items-center justify-between gap-2">
           <Texto peso="semibold" className="flex-1 text-label-sm text-outline" numberOfLines={1}>
@@ -219,6 +266,22 @@ function GrupoDaFila({ item }: { item: ItemFila }) {
           <Texto className="text-label-sm text-outline mt-0.5" numberOfLines={1}>
             {detalhes}
           </Texto>
+        )}
+        {item.pendente && (
+          <View className="flex-row items-center gap-1 mt-2">
+            <MaterialIcons color={paleta.secondary} name="cloud-upload" size={14} />
+            <Texto peso="medium" className="text-label-sm text-secondary">
+              Salva no celular, falta enviar
+            </Texto>
+          </View>
+        )}
+        {item.aviso && (
+          <View className="flex-row items-start gap-1 mt-2">
+            <MaterialIcons color={paleta.error} name="error-outline" size={14} />
+            <Texto className="flex-1 text-label-sm text-error" numberOfLines={2}>
+              {item.aviso}
+            </Texto>
+          </View>
         )}
       </Pressable>
     </Link>

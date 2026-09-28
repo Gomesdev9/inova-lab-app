@@ -1,5 +1,5 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { Redirect, router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -10,11 +10,11 @@ import {
   Pressable,
   ScrollView,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { carregarDetalhe, salvarAvaliacao, type DetalheProjeto } from '@/api/avaliacoes';
 import { BarraProgresso } from '@/components/BarraProgresso';
 import { Cartao } from '@/components/Cartao';
 import { Selo } from '@/components/Selo';
@@ -50,16 +50,20 @@ function voltarParaFila() {
 
 export default function FichaDeAvaliacao() {
   const { projeto: uuid } = useLocalSearchParams<{ projeto: string }>();
-  const { fila, carregando } = useAvaliacao();
+  const { fila, pronto, email } = useAvaliacao();
   const paleta = usePaleta();
   const indice = fila.findIndex((item) => item.projeto.uuid === uuid);
 
-  if (carregando) {
+  if (!pronto) {
     return (
       <View className="flex-1 items-center justify-center bg-surface">
         <ActivityIndicator color={paleta.primary} size="large" />
       </View>
     );
+  }
+
+  if (!email) {
+    return <Redirect href="/identificacao" />;
   }
 
   if (indice === -1) {
@@ -80,15 +84,22 @@ export default function FichaDeAvaliacao() {
     );
   }
 
-  // key: ao ir para o próximo grupo, a ficha começa do zero com a dele.
-  return <Ficha fila={fila} indice={indice} item={fila[indice]} key={uuid} />;
+  // key: ao ir para o próximo grupo, a ficha começa do zero com a dele. O
+  // aviso entra na key porque ele chega junto com a versão do servidor (numa
+  // recusa ou conflito), e a tela precisa mostrar essa, e não a antiga.
+  const item = fila[indice];
+  return <Ficha fila={fila} indice={indice} item={item} key={`${uuid}:${item.aviso ?? ''}`} />;
 }
 
 function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indice: number }) {
-  const { recarregar, avisar } = useAvaliacao();
+  const { salvar: salvarFicha, avisar, dispensarAviso } = useAvaliacao();
   const navigation = useNavigation();
   const paleta = usePaleta();
   const { top, bottom } = useSafeAreaInsets();
+  // No tablet a ficha fica numa coluna de até 760px no meio da tela, e a barra
+  // de baixo acompanha a mesma coluna.
+  const { width } = useWindowDimensions();
+  const lateral = Math.max(16, (width - 760) / 2 + 16);
   const { projeto } = item;
 
   const [niveis, setNiveis] = useState<Niveis>(() =>
@@ -98,7 +109,6 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
   );
   const [comentarios, setComentarios] = useState(item.avaliacao?.comentarios ?? '');
   const [salvando, setSalvando] = useState(false);
-  const [detalhe, setDetalhe] = useState<DetalheProjeto | null>(null);
   const [descricaoAberta, setDescricaoAberta] = useState(false);
 
   // Ref, e não estado: o aviso de saída lê o valor na hora em que o
@@ -110,14 +120,6 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
   const jaFinalizada = item.situacao === 'avaliado';
   const travada = item.travada;
   const temProximo = proximoPendente(fila, indice) !== null;
-
-  useEffect(() => {
-    let ativo = true;
-    carregarDetalhe(projeto.uuid).then((resposta) => ativo && setDetalhe(resposta));
-    return () => {
-      ativo = false;
-    };
-  }, [projeto.uuid]);
 
   // Voltar para a lista com a ficha pela metade perderia os cliques sem
   // aviso: pergunta antes, como o site faz ao trocar de grupo.
@@ -162,12 +164,12 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
   const salvar = async (acao: 'rascunho' | 'finalizar') => {
     setSalvando(true);
     try {
-      const resultado = await salvarAvaliacao(projeto.uuid, niveis, comentarios, acao);
+      // Salva no tablet: funciona sem internet, e o envio vem depois.
+      const resultado = await salvarFicha(projeto.uuid, niveis, comentarios, acao);
       if (resultado.salvo) {
         alterada.current = false;
       }
 
-      await recarregar();
       avisar({ tipo: resultado.ok ? 'sucesso' : 'erro', mensagem: resultado.mensagem });
       setSalvando(false);
 
@@ -175,25 +177,21 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
         router.replace(`/avaliacao/${resultado.proximoUuid}`);
       }
     } catch {
-      avisar({ tipo: 'erro', mensagem: 'Não foi possível salvar agora. Confira a conexão e tente de novo.' });
+      avisar({ tipo: 'erro', mensagem: 'Não foi possível salvar no tablet. Tente de novo.' });
       setSalvando(false);
     }
   };
 
-  // Só http(s): o link do vídeo é digitado pelo grupo.
+  // Só http(s): o link do vídeo é digitado pelo grupo. Abre fora do app, e
+  // só com internet — o resto da ficha não depende dele.
   const videoUrl = projeto.video_url && /^https?:\/\//i.test(projeto.video_url) ? projeto.video_url : null;
-  const materiais = [
-    { icone: 'picture-as-pdf' as const, rotulo: 'Resumo (PDF)', url: detalhe?.resumoUrl ?? null },
-    { icone: 'image' as const, rotulo: 'Banner', url: detalhe?.bannerUrl ?? null },
-    { icone: 'play-circle-outline' as const, rotulo: 'Vídeo', url: videoUrl },
-  ].filter((material) => material.url !== null);
 
   const etiquetas = [projeto.grupo_nome, projeto.categoria, projeto.evento_nome].filter(Boolean) as string[];
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1 bg-surface">
       <ScrollView
-        contentContainerStyle={{ paddingTop: top + 12, paddingBottom: 24, paddingHorizontal: 16, gap: 16 }}
+        contentContainerStyle={{ paddingTop: top + 12, paddingBottom: 24, paddingHorizontal: lateral, gap: 16 }}
         keyboardShouldPersistTaps="handled"
       >
         {/* Topo: de onde veio e como voltar para a lista. */}
@@ -215,7 +213,26 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
           <Texto peso="bold" className="text-headline-md text-on-surface">
             Avaliar grupo
           </Texto>
+          {item.pendente && (
+            <View className="flex-row items-center gap-1 mt-1">
+              <MaterialIcons color={paleta.secondary} name={jaFinalizada ? 'cloud-upload' : 'edit-note'} size={16} />
+              <Texto peso="medium" className="text-label-sm text-secondary">
+                {jaFinalizada ? 'Salva no tablet, falta enviar ao servidor' : 'Rascunho salvo no tablet'}
+              </Texto>
+            </View>
+          )}
         </View>
+
+        {/* O que o servidor respondeu da última vez que recebeu esta ficha. */}
+        {item.aviso && (
+          <View className="flex-row items-start gap-3 rounded-2xl bg-error-container p-4">
+            <MaterialIcons color={paleta['on-error-container']} name="error-outline" size={20} />
+            <Texto className="flex-1 text-body-sm text-on-error-container">{item.aviso}</Texto>
+            <Pressable accessibilityLabel="Dispensar aviso" accessibilityRole="button" hitSlop={8} onPress={() => dispensarAviso(projeto.uuid)}>
+              <MaterialIcons color={paleta['on-error-container']} name="close" size={20} />
+            </Pressable>
+          </View>
+        )}
 
         {/* GRUPO AVALIADO */}
         <Cartao>
@@ -237,12 +254,10 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
 
           <View className="gap-4 mt-stack-md pt-stack-md border-t border-outline-variant">
             <Dado rotulo="Integrantes">
-              {detalhe === null ? (
-                <Texto className="text-body-sm text-outline">Carregando…</Texto>
-              ) : detalhe.membros.length === 0 ? (
+              {projeto.membros.length === 0 ? (
                 <Texto className="text-body-sm text-outline italic">Nenhum aluno no grupo</Texto>
               ) : (
-                <Texto className="text-body-sm text-on-surface">{detalhe.membros.join(' · ')}</Texto>
+                <Texto className="text-body-sm text-on-surface">{projeto.membros.join(' · ')}</Texto>
               )}
             </Dado>
             <Dado rotulo="Escola">
@@ -253,25 +268,18 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
             </Dado>
           </View>
 
-          {/* O material que se avalia abre fora do app; a ficha continua como estava. */}
-          <View className="flex-row flex-wrap gap-2 mt-stack-md">
-            {materiais.map((material) => (
-              <Pressable
-                accessibilityRole="link"
-                className="flex-row items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant active:border-primary active:bg-primary/5"
-                key={material.rotulo}
-                onPress={() => Linking.openURL(material.url!)}
-              >
-                <MaterialIcons color={paleta.primary} name={material.icone} size={18} />
-                <Texto peso="medium" className="text-label-sm text-primary">
-                  {material.rotulo}
-                </Texto>
-              </Pressable>
-            ))}
-            {detalhe !== null && materiais.length === 0 && (
-              <Texto className="text-label-sm text-outline italic">O grupo não anexou resumo, banner nem vídeo.</Texto>
-            )}
-          </View>
+          {videoUrl && (
+            <Pressable
+              accessibilityRole="link"
+              className="flex-row items-center self-start gap-1.5 px-3 py-2 mt-stack-md rounded-xl border border-outline-variant active:border-primary active:bg-primary/5"
+              onPress={() => Linking.openURL(videoUrl)}
+            >
+              <MaterialIcons color={paleta.primary} name="play-circle-outline" size={18} />
+              <Texto peso="medium" className="text-label-sm text-primary">
+                Vídeo
+              </Texto>
+            </Pressable>
+          )}
 
           {projeto.descricao?.trim() ? (
             <View className="mt-4">
@@ -375,8 +383,8 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
 
       {/* NOTA E AÇÕES: fixa embaixo, para a nota acompanhar os toques enquanto a ficha rola. */}
       <View
-        className="bg-surface-container-lowest border-t border-outline-variant px-margin-mobile pt-4 gap-4 shadow-lg shadow-black/20"
-        style={{ paddingBottom: bottom + 12 }}
+        className="bg-surface-container-lowest border-t border-outline-variant pt-4 gap-4 shadow-lg shadow-black/20"
+        style={{ paddingBottom: bottom + 12, paddingHorizontal: lateral }}
       >
         <View className="flex-row items-center gap-4">
           <View>

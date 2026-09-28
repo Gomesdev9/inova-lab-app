@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Projetos da feira embutidos no APK: nomes de alunos, não vão para o git.
+# O postinstall cria um vazio; "npm run pacote" ou "npm run apk" baixa o real.
+src/dados/pacote-inicial.json
+
+# APKs gerados por "npm run apk"
+dist-apk/

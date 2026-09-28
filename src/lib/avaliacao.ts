@@ -62,8 +62,12 @@ export type Projeto = {
   video_url: string | null;
   grupo_nome: string;
   orientador_nome: string | null;
+  /** Em minúsculas. O grupo sai da fila de quem digitar este e-mail: ninguém avalia o próprio grupo. */
+  orientador_email: string | null;
   evento_nome: string | null;
   notas_liberadas_at: string | null;
+  /** Nomes dos integrantes, já baixados para aparecerem sem internet. */
+  membros: string[];
 };
 
 /** Um grupo da fila do avaliador, como filaDeAvaliacao() monta no site. */
@@ -75,6 +79,10 @@ export type ItemFila = {
   marcados: number;
   /** Feira com notas liberadas: a ficha só pode ser lida. */
   travada: boolean;
+  /** Mexida no aparelho e ainda não enviada ao servidor. */
+  pendente: boolean;
+  /** O que o servidor disse na última vez que recebeu esta ficha, se precisar ser lido. */
+  aviso: string | null;
 };
 
 export function niveisVazios(): Niveis {
