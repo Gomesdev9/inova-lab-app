@@ -16,7 +16,7 @@ export async function baixarPacote() {
 
   let resposta;
   try {
-    resposta = await fetch(`${servidor}/api/tablet/pacote`, { headers: { Accept: 'application/json', 'X-Chave-App': chave } });
+    resposta = await fetch(`${servidor}/index.php?_route=${encodeURIComponent('/api/tablet/pacote')}`, { headers: { Accept: 'application/json', 'X-Chave-App': chave } });
   } catch {
     throw new Error(`Não foi possível falar com ${servidor}. O Apache e o MySQL estão ligados?`);
   }

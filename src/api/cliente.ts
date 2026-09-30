@@ -49,7 +49,9 @@ async function chamar<T>(caminho: string, corpo?: unknown): Promise<T> {
 
   let resposta: Response;
   try {
-    resposta = await fetch(`${SERVIDOR}${caminho}`, {
+    // Pelo index.php?_route=, como os links do próprio site: funciona também
+    // em servidor sem URL amigável (mod_rewrite), como o caioba.pr.senac.br.
+    resposta = await fetch(`${SERVIDOR}/index.php?_route=${encodeURIComponent(caminho)}`, {
       method: corpo === undefined ? 'GET' : 'POST',
       headers: {
         Accept: 'application/json',
