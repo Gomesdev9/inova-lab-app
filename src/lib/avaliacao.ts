@@ -1,8 +1,8 @@
 /**
  * A ficha de avaliação, espelhando app/Models/Avaliacao.php do site: cinco
- * critérios, cada um Regular, Bom ou Ótimo, e um parecer opcional. Os valores
- * precisam ser os mesmos de lá, senão a nota que o avaliador vê aqui não bate
- * com a que o servidor grava.
+ * critérios, cada um com uma menção — Atendido, Parcialmente atendido ou Não
+ * atendido — e um parecer opcional. Os valores precisam ser os mesmos de lá,
+ * senão a menção que o avaliador vê aqui não bate com a do site.
  */
 
 export const CRITERIOS = {
@@ -31,17 +31,37 @@ export const CRITERIOS = {
 export type Criterio = keyof typeof CRITERIOS;
 export const CHAVES_CRITERIOS = Object.keys(CRITERIOS) as Criterio[];
 
-/** Em centésimos (0,30 · 0,70 · 1,00), inteiro para a soma não virar 2,6999. */
+/**
+ * A avaliação é por menção, como nos indicadores do Senac: cada critério é
+ * Atendido (A), Parcialmente atendido (PA) ou Não atendido (NA).
+ *
+ * As chaves são as da época em que a escala era Regular/Bom/Ótimo (regular =
+ * NA, bom = PA, otimo = A): são os valores que o banco guarda e que a API
+ * recebe, então não mudam. A ordem é a das fichas do Senac, do melhor para o
+ * pior, e é a ordem dos botões na ficha.
+ *
+ * Os pontos ficam só por dentro, para tirar a menção da ficha inteira;
+ * ninguém vê número.
+ */
 export const NIVEIS = {
-  regular: { rotulo: 'Regular', pontos: 30 },
-  bom: { rotulo: 'Bom', pontos: 70 },
-  otimo: { rotulo: 'Ótimo', pontos: 100 },
+  otimo: { sigla: 'A', rotulo: 'Atendido', pontos: 100 },
+  bom: { sigla: 'PA', rotulo: 'Parcialmente atendido', pontos: 50 },
+  regular: { sigla: 'NA', rotulo: 'Não atendido', pontos: 0 },
 } as const;
 
 export type Nivel = keyof typeof NIVEIS;
 export const CHAVES_NIVEIS = Object.keys(NIVEIS) as Nivel[];
 
+/** Pontos máximos de uma ficha: todos os critérios Atendidos. */
 export const NOTA_MAXIMA = 500;
+
+/**
+ * A partir de quanto do máximo (em %) a média vira cada menção: 75% ou mais é
+ * A, 25% ou mais é PA, abaixo disso NA. As mesmas faixas de
+ * Avaliacao::FAIXA_ATENDIDO e FAIXA_PARCIAL.
+ */
+export const FAIXA_ATENDIDO = 75;
+export const FAIXA_PARCIAL = 25;
 export const PARECER_MAXIMO = 5000;
 
 export type Niveis = Record<Criterio, Nivel | null>;
@@ -77,7 +97,7 @@ export type ItemFila = {
   situacao: Situacao;
   pontos: number;
   marcados: number;
-  /** Feira com notas liberadas: a ficha só pode ser lida. */
+  /** Feira com menções liberadas: a ficha só pode ser lida. */
   travada: boolean;
   /** Mexida no aparelho e ainda não enviada ao servidor. */
   pendente: boolean;
@@ -113,9 +133,33 @@ export function situacaoDe(avaliacao: Avaliacao | null): Situacao {
   return avaliacao.status === 'finalizada' ? 'avaliado' : 'em_avaliacao';
 }
 
-/** 270 → '2,70', como o format_nota() do site. */
-export function formatNota(centesimos: number): string {
-  return (centesimos / 100).toFixed(2).replace('.', ',');
+/**
+ * A menção que uma quantidade de pontos representa, como Avaliacao::mencao()
+ * no site: a soma de uma ficha (máximo NOTA_MAXIMA) ou, numa ficha pela
+ * metade, só dos critérios já marcados (máximo marcados × 100).
+ */
+export function mencao(pontosDaFicha: number, maximo: number = NOTA_MAXIMA): Nivel {
+  const porcentagem = maximo > 0 ? (pontosDaFicha * 100) / maximo : 0;
+
+  if (porcentagem >= FAIXA_ATENDIDO) {
+    return 'otimo';
+  }
+
+  return porcentagem >= FAIXA_PARCIAL ? 'bom' : 'regular';
+}
+
+/**
+ * A menção da ficha como está agora: com todos os critérios, a final; pela
+ * metade, a parcial, contando só os marcados. null sem nenhum marcado.
+ */
+export function mencaoDaFicha(niveis: Partial<Niveis> | null): Nivel | null {
+  const marcados = criteriosMarcados(niveis);
+  return marcados > 0 ? mencao(pontos(niveis), marcados * 100) : null;
+}
+
+/** "A (Atendido)", como nas mensagens do site. */
+export function descreverMencao(nivel: Nivel): string {
+  return `${NIVEIS[nivel].sigla} (${NIVEIS[nivel].rotulo})`;
 }
 
 /**

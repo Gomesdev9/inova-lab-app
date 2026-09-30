@@ -18,7 +18,7 @@ Uma vez por máquina:
 - Neste projeto: `.env.local` com o endereço do site e a mesma chave:
 
   ```ini
-  EXPO_PUBLIC_API_URL=http://192.168.0.10/inova_lab/public
+  EXPO_PUBLIC_API_URL=http://192.168.0.10/inova_lab
   EXPO_PUBLIC_CHAVE_APP=a-mesma-de-APP_CHAVE_TABLETS
   ```
 
@@ -57,7 +57,7 @@ npm run pacote      # baixa os projetos do site para src/dados/pacote-inicial.js
 | `src/app` | Telas: e-mail (`identificacao.tsx`), lista (`avaliacao/index.tsx`) e ficha (`avaliacao/[projeto].tsx`) |
 | `src/api/cliente.ts` | As duas chamadas à API do site (`/api/tablet/pacote` e `/api/tablet/avaliacoes`) |
 | `src/offline` | Banco do tablet (`banco.ts`, `armazem.ts`), regras de salvar (`registrar.ts`) e envio (`envio.ts`) |
-| `src/lib/avaliacao.ts` | Critérios, níveis e cálculo da nota, iguais aos de `Models/Avaliacao.php` |
+| `src/lib/avaliacao.ts` | Critérios, menções (A / PA / NA) e o cálculo da menção final, iguais aos de `Models/Avaliacao.php` |
 | `src/context` | Estado do app e quando enviar |
 | `scripts` | `baixar-pacote.mjs`, `gerar-apk.mjs` e o `pacote-vazio.mjs` do postinstall |
 

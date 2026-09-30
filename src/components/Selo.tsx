@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 
-import { formatNota, type ItemFila } from '@/lib/avaliacao';
+import { NIVEIS, mencao, type ItemFila } from '@/lib/avaliacao';
 
 import { Texto } from './Texto';
 
@@ -13,7 +13,8 @@ const selos = {
 
 export function Selo({ item, pequeno = false }: { item: ItemFila; pequeno?: boolean }) {
   const selo = selos[item.situacao];
-  const rotulo = item.situacao === 'avaliado' ? `${selo.rotulo} · ${formatNota(item.pontos)}` : selo.rotulo;
+  // Avaliado leva a menção final junto, como na fila do site: "Avaliado · A".
+  const rotulo = item.situacao === 'avaliado' ? `${selo.rotulo} · ${NIVEIS[mencao(item.pontos)].sigla}` : selo.rotulo;
 
   return (
     <View className={`shrink-0 px-2.5 py-0.5 rounded-full ${selo.fundo}`}>

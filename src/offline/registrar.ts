@@ -2,7 +2,8 @@ import {
   CHAVES_CRITERIOS,
   PARECER_MAXIMO,
   criteriosMarcados,
-  formatNota,
+  descreverMencao,
+  mencao,
   pontos,
   proximoPendente,
   type ItemFila,
@@ -44,7 +45,7 @@ export async function registrarNoAparelho(
     return {
       ok: false,
       salvo: false,
-      mensagem: 'As notas desta feira já foram liberadas para os alunos, então a avaliação está travada. Fale com a coordenação se precisar corrigir algo.',
+      mensagem: 'As menções desta feira já foram liberadas para os alunos, então a avaliação está travada. Fale com a coordenação se precisar corrigir algo.',
     };
   }
 
@@ -86,10 +87,10 @@ export async function registrarNoAparelho(
     return { ok: true, salvo: true, mensagem: 'Rascunho salvo. Você pode voltar e terminar depois.' };
   }
 
-  const nota = formatNota(pontos(niveis));
+  const final = descreverMencao(mencao(pontos(niveis)));
 
   if (jaFinalizada) {
-    return { ok: true, salvo: true, mensagem: `Avaliação atualizada. Nota ${nota} de 5,00.` };
+    return { ok: true, salvo: true, mensagem: `Avaliação atualizada. Menção ${final}.` };
   }
 
   // A fila recebida é a de antes de salvar: este grupo conta como avaliado.
@@ -97,13 +98,13 @@ export async function registrarNoAparelho(
   const proximo = proximoPendente(depois, indice);
 
   if (proximo === null) {
-    return { ok: true, salvo: true, mensagem: `Avaliação finalizada com nota ${nota}. Você avaliou todos os grupos da sua fila.` };
+    return { ok: true, salvo: true, mensagem: `Avaliação finalizada com menção ${final}. Você avaliou todos os grupos da sua fila.` };
   }
 
   return {
     ok: true,
     salvo: true,
-    mensagem: `Avaliação finalizada com nota ${nota}. Este é o próximo grupo da fila.`,
+    mensagem: `Avaliação finalizada com menção ${final}. Este é o próximo grupo da fila.`,
     proximoUuid: depois[proximo].projeto.uuid,
   };
 }

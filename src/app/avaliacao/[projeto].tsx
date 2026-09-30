@@ -27,15 +27,15 @@ import {
   NIVEIS,
   PARECER_MAXIMO,
   criteriosMarcados,
-  formatNota,
+  mencaoDaFicha,
   niveisVazios,
-  pontos,
   proximoPendente,
   type Criterio,
   type ItemFila,
   type Nivel,
   type Niveis,
 } from '@/lib/avaliacao';
+import { CORES_MENCAO } from '@/theme/mencoes';
 import { usePaleta } from '@/theme/usePaleta';
 
 const TOTAL_CRITERIOS = CHAVES_CRITERIOS.length;
@@ -116,7 +116,10 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
   const alterada = useRef(false);
 
   const marcados = criteriosMarcados(niveis);
-  const nota = pontos(niveis);
+  // A mesma conta do site, refeita a cada toque. Parcial, conta só os
+  // critérios já marcados.
+  const mencaoAtual = mencaoDaFicha(niveis);
+  const coresMencao = CORES_MENCAO[mencaoAtual ?? 'nenhuma'];
   const jaFinalizada = item.situacao === 'avaliado';
   const travada = item.travada;
   const temProximo = proximoPendente(fila, indice) !== null;
@@ -304,7 +307,7 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
             Critérios de avaliação
           </Texto>
           <Texto peso="medium" className="text-label-sm text-outline mt-1">
-            {CHAVES_NIVEIS.map((nivel) => `${NIVEIS[nivel].rotulo} ${formatNota(NIVEIS[nivel].pontos)}`).join(' · ')}
+            {CHAVES_NIVEIS.map((nivel) => `${NIVEIS[nivel].sigla} = ${NIVEIS[nivel].rotulo}`).join(' · ')}
           </Texto>
 
           {CHAVES_CRITERIOS.map((criterio, posicao) => (
@@ -321,26 +324,28 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
                 <Texto className="text-body-sm text-on-surface-variant mt-1">{CRITERIOS[criterio].descricao}</Texto>
               </View>
 
-              <View accessibilityLabel={CRITERIOS[criterio].titulo} accessibilityRole="radiogroup" className="flex-row gap-2">
+              {/* items-stretch: os três botões ficam da mesma altura, mesmo quando
+                  "Parcialmente atendido" quebra em duas linhas. */}
+              <View accessibilityLabel={CRITERIOS[criterio].titulo} accessibilityRole="radiogroup" className="flex-row items-stretch gap-2">
                 {CHAVES_NIVEIS.map((nivel) => {
                   const marcado = niveis[criterio] === nivel;
                   return (
                     <Pressable
-                      accessibilityLabel={`${NIVEIS[nivel].rotulo}, ${formatNota(NIVEIS[nivel].pontos)}`}
+                      accessibilityLabel={NIVEIS[nivel].rotulo}
                       accessibilityRole="radio"
                       accessibilityState={{ checked: marcado, disabled: travada }}
-                      className={`flex-1 items-center rounded-xl border px-2 py-2.5 ${
+                      className={`flex-1 items-center justify-center rounded-xl border px-2 py-2.5 ${
                         marcado ? 'bg-primary border-primary' : `border-outline-variant ${travada ? 'opacity-60' : 'active:border-primary'}`
                       }`}
                       disabled={travada}
                       key={nivel}
                       onPress={() => marcar(criterio, nivel)}
                     >
-                      <Texto peso="medium" className={`text-label-md ${marcado ? 'text-on-primary' : 'text-on-surface'}`}>
-                        {NIVEIS[nivel].rotulo}
+                      <Texto peso="bold" className={`text-headline-sm ${marcado ? 'text-on-primary' : 'text-on-surface'}`}>
+                        {NIVEIS[nivel].sigla}
                       </Texto>
-                      <Texto className={`text-label-sm opacity-80 ${marcado ? 'text-on-primary' : 'text-on-surface'}`}>
-                        {formatNota(NIVEIS[nivel].pontos)}
+                      <Texto className={`text-label-sm leading-tight text-center opacity-80 ${marcado ? 'text-on-primary' : 'text-on-surface'}`}>
+                        {NIVEIS[nivel].rotulo}
                       </Texto>
                     </Pressable>
                   );
@@ -381,21 +386,28 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
         </Cartao>
       </ScrollView>
 
-      {/* NOTA E AÇÕES: fixa embaixo, para a nota acompanhar os toques enquanto a ficha rola. */}
+      {/* MENÇÃO E AÇÕES: fixa embaixo, para a menção acompanhar os toques enquanto a ficha rola. */}
       <View
         className="bg-surface-container-lowest border-t border-outline-variant pt-4 gap-4 shadow-lg shadow-black/20"
         style={{ paddingBottom: bottom + 12, paddingHorizontal: lateral }}
       >
         <View className="flex-row items-center gap-4">
-          <View>
+          <View
+            accessibilityLabel={`${jaFinalizada ? 'Menção deste grupo' : 'Menção parcial'}: ${mencaoAtual ? NIVEIS[mencaoAtual].rotulo : 'nenhum critério marcado'}`}
+            accessible
+          >
             <Texto peso="medium" className="text-label-sm text-on-surface-variant uppercase tracking-wider">
-              {jaFinalizada ? 'Nota deste grupo' : 'Nota parcial'}
+              {jaFinalizada ? 'Menção deste grupo' : 'Menção parcial'}
             </Texto>
-            <View className="flex-row items-baseline gap-1 mt-1">
-              <Texto accessibilityLabel={`Nota ${formatNota(nota)} de 5,00`} peso="bold" className="text-[36px] leading-[40px] text-primary">
-                {formatNota(nota)}
+            <View className="flex-row items-center gap-2 mt-1">
+              <View className={`min-w-12 h-12 px-2 rounded-xl items-center justify-center ${coresMencao.fundo}`}>
+                <Texto peso="bold" className={`text-[26px] leading-[32px] ${coresMencao.texto}`}>
+                  {mencaoAtual ? NIVEIS[mencaoAtual].sigla : '—'}
+                </Texto>
+              </View>
+              <Texto className="text-body-sm text-on-surface-variant max-w-36">
+                {mencaoAtual ? NIVEIS[mencaoAtual].rotulo : 'Nenhum critério marcado'}
               </Texto>
-              <Texto className="text-body-sm text-outline">/ 5,00</Texto>
             </View>
           </View>
           <View className="flex-1">
@@ -410,7 +422,7 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
           <View className="flex-row items-center gap-2">
             <MaterialIcons color={paleta['on-surface-variant']} name="lock-outline" size={20} />
             <Texto className="flex-1 text-body-sm text-on-surface-variant">
-              As notas desta feira já foram liberadas para os alunos. A avaliação não pode mais ser alterada.
+              As menções desta feira já foram liberadas para os alunos. A avaliação não pode mais ser alterada.
             </Texto>
           </View>
         ) : (
