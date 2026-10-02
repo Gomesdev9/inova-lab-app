@@ -16,7 +16,11 @@ export async function baixarPacote() {
 
   let resposta;
   try {
-    resposta = await fetch(`${servidor}/api/tablet/pacote`, { headers: { Accept: 'application/json', 'X-Chave-App': chave } });
+    // Mesma regra de enderecoDa() em src/api/cliente.ts: endereço terminado em
+    // index.php leva a rota em ?_route= (servidor sem URLs limpas).
+    const caminho = '/api/tablet/pacote';
+    const endereco = /\.php$/i.test(servidor) ? `${servidor}?_route=${encodeURIComponent(caminho)}` : `${servidor}${caminho}`;
+    resposta = await fetch(endereco, { headers: { Accept: 'application/json', 'X-Chave-App': chave } });
   } catch {
     throw new Error(`Não foi possível falar com ${servidor}. O Apache e o MySQL estão ligados?`);
   }
@@ -29,9 +33,19 @@ export async function baixarPacote() {
   writeFileSync(new URL('../src/dados/pacote-inicial.json', import.meta.url), JSON.stringify(dados, null, 2) + '\n');
 
   const feiras = [...new Set(dados.projetos.map((projeto) => projeto.evento_nome ?? 'sem feira'))];
+  const avaliadores = Array.isArray(dados.avaliadores) ? dados.avaliadores.length : 0;
   console.log(`Pacote baixado em ${dados.gerado_em}: ${dados.projetos.length} projeto(s) — ${feiras.join(', ') || 'nenhuma feira em andamento'}.`);
+  console.log(`${avaliadores} avaliador(es) na lista.`);
+
   if (dados.projetos.length === 0) {
     console.warn('Atenção: nenhum projeto enviado numa feira em andamento. O APK sairia sem nada para avaliar.');
+  }
+  if (!Array.isArray(dados.avaliadores)) {
+    console.warn('Atenção: o site não mandou a lista de avaliadores (versão antiga do ApiController.php). No tablet, cada um vai ter que digitar o e-mail.');
+  }
+  const semCriterios = dados.projetos.filter((projeto) => !Array.isArray(projeto.criterios) || projeto.criterios.length === 0);
+  if (semCriterios.length > 0) {
+    console.warn(`Atenção: ${semCriterios.length} projeto(s) de feira sem critérios de avaliação cadastrados. O admin precisa cadastrar em Critérios antes.`);
   }
 
   return dados;

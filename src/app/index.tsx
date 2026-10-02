@@ -2,13 +2,13 @@ import { Redirect } from 'expo-router';
 
 import { useAvaliacao } from '@/context/AvaliacaoContext';
 
-// Sem e-mail, o tablet ainda não sabe quem vai avaliar: pede primeiro.
+// Sem ninguém com o tablet, mostra a lista para o avaliador escolher o nome.
 export default function Inicio() {
-  const { pronto, email } = useAvaliacao();
+  const { pronto, atual } = useAvaliacao();
 
   if (!pronto) {
     return null;
   }
 
-  return <Redirect href={email ? '/avaliacao' : '/identificacao'} />;
+  return <Redirect href={atual ? '/avaliacao' : '/identificacao'} />;
 }

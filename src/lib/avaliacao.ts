@@ -1,39 +1,25 @@
 /**
- * A ficha de avaliação, espelhando app/Models/Avaliacao.php do site: cinco
- * critérios, cada um com uma menção — Atendido, Parcialmente atendido ou Não
- * atendido — e um parecer opcional. Os valores precisam ser os mesmos de lá,
- * senão a menção que o avaliador vê aqui não bate com a do site.
+ * A ficha de avaliação, espelhando app/Models/Avaliacao.php do site. Os
+ * critérios não são mais fixos: cada feira tem os seus, cadastrados pelo admin
+ * (título, descrição e peso), e chegam no pacote junto com cada projeto. Cada
+ * critério recebe uma menção — Atendido, Parcialmente atendido ou Não
+ * atendido. As contas precisam ser as mesmas de lá, senão a menção que o
+ * avaliador vê aqui não bate com a que o site grava.
  */
 
-export const CRITERIOS = {
-  funcionalidade: {
-    titulo: 'Funcionalidade',
-    descricao: 'O projeto executa todas as tarefas propostas de forma estável, sem travamentos ou erros críticos.',
-  },
-  usabilidade: {
-    titulo: 'Usabilidade e visual',
-    descricao: 'A interface é intuitiva, o design é agradável e o projeto proporciona uma boa experiência de uso.',
-  },
-  originalidade: {
-    titulo: 'Originalidade',
-    descricao: 'O projeto apresenta uma solução criativa, inovadora ou um diferencial claro em relação a projetos similares.',
-  },
-  conclusao: {
-    titulo: 'Nível de conclusão',
-    descricao: 'O projeto foi entregue polido e completo, ou ainda faltam funcionalidades para a sua conclusão.',
-  },
-  apresentacao: {
-    titulo: 'Apresentação e entrega',
-    descricao: 'O grupo demonstrou domínio técnico sobre o projeto e o apresentou de forma clara.',
-  },
-} as const;
-
-export type Criterio = keyof typeof CRITERIOS;
-export const CHAVES_CRITERIOS = Object.keys(CRITERIOS) as Criterio[];
+/** Um critério da ficha, como o admin cadastrou para a feira. */
+export type Criterio = {
+  /** Identificador estável dentro da feira: é o nome do campo no envio. */
+  chave: string;
+  titulo: string;
+  descricao: string;
+  /** Quanto conta na média da ficha (1 a 10). */
+  peso: number;
+};
 
 /**
- * A avaliação é por menção, como nos indicadores do Senac: cada critério é
- * Atendido (A), Parcialmente atendido (PA) ou Não atendido (NA).
+ * Cada critério é Atendido (A), Parcialmente atendido (PA) ou Não atendido
+ * (NA), como nos indicadores do Senac.
  *
  * As chaves são as da época em que a escala era Regular/Bom/Ótimo (regular =
  * NA, bom = PA, otimo = A): são os valores que o banco guarda e que a API
@@ -52,8 +38,15 @@ export const NIVEIS = {
 export type Nivel = keyof typeof NIVEIS;
 export const CHAVES_NIVEIS = Object.keys(NIVEIS) as Nivel[];
 
-/** Pontos máximos de uma ficha: todos os critérios Atendidos. */
-export const NOTA_MAXIMA = 500;
+export function ehNivel(valor: unknown): valor is Nivel {
+  return typeof valor === 'string' && valor in NIVEIS;
+}
+
+/**
+ * Escala da nota de uma ficha: a média dos critérios, ponderada pelo peso de
+ * cada um, de 0 a 1000 — como Avaliacao::NOTA_MAXIMA no site.
+ */
+export const NOTA_MAXIMA = 1000;
 
 /**
  * A partir de quanto do máximo (em %) a média vira cada menção: 75% ou mais é
@@ -62,11 +55,14 @@ export const NOTA_MAXIMA = 500;
  */
 export const FAIXA_ATENDIDO = 75;
 export const FAIXA_PARCIAL = 25;
+
 export const PARECER_MAXIMO = 5000;
 
-export type Niveis = Record<Criterio, Nivel | null>;
+/** A menção marcada em cada critério, pela chave. Critério sem menção não aparece. */
+export type Niveis = Record<string, Nivel>;
 
-export type Avaliacao = Niveis & {
+export type Avaliacao = {
+  niveis: Niveis;
   comentarios: string | null;
   status: 'rascunho' | 'finalizada';
 };
@@ -82,12 +78,14 @@ export type Projeto = {
   video_url: string | null;
   grupo_nome: string;
   orientador_nome: string | null;
-  /** Em minúsculas. O grupo sai da fila de quem digitar este e-mail: ninguém avalia o próprio grupo. */
+  /** Em minúsculas. O grupo sai da fila de quem tiver este e-mail: ninguém avalia o próprio grupo. */
   orientador_email: string | null;
   evento_nome: string | null;
   notas_liberadas_at: string | null;
   /** Nomes dos integrantes, já baixados para aparecerem sem internet. */
   membros: string[];
+  /** A ficha da feira do projeto, na ordem que o admin deixou. */
+  criterios: Criterio[];
 };
 
 /** Um grupo da fila do avaliador, como filaDeAvaliacao() monta no site. */
@@ -95,34 +93,51 @@ export type ItemFila = {
   projeto: Projeto;
   avaliacao: Avaliacao | null;
   situacao: Situacao;
+  /** A nota da ficha, de 0 a NOTA_MAXIMA. Só por dentro: a tela mostra a menção. */
   pontos: number;
   marcados: number;
   /** Feira com menções liberadas: a ficha só pode ser lida. */
   travada: boolean;
-  /** Mexida no aparelho e ainda não enviada ao servidor. */
+  /** Mexida no tablet e ainda não aceita pelo servidor. */
   pendente: boolean;
   /** O que o servidor disse na última vez que recebeu esta ficha, se precisar ser lido. */
   aviso: string | null;
 };
 
-export function niveisVazios(): Niveis {
-  return Object.fromEntries(CHAVES_CRITERIOS.map((criterio) => [criterio, null])) as Niveis;
-}
-
-/** Soma dos critérios marcados, em centésimos. Rascunho soma só o que tem. */
-export function pontos(niveis: Partial<Niveis> | null): number {
+/**
+ * A nota da ficha, de 0 a NOTA_MAXIMA: a média dos critérios marcados,
+ * ponderada pelo peso de cada um, como Avaliacao::pontos() no site (com o
+ * mesmo arredondamento). Rascunho conta só o que tem — é a menção parcial.
+ */
+export function pontos(niveis: Niveis | null, criterios: Criterio[]): number {
   if (!niveis) {
     return 0;
   }
 
-  return CHAVES_CRITERIOS.reduce((total, criterio) => {
-    const nivel = niveis[criterio];
-    return total + (nivel ? NIVEIS[nivel].pontos : 0);
-  }, 0);
+  let soma = 0;
+  let pesos = 0;
+
+  for (const criterio of criterios) {
+    const nivel = niveis[criterio.chave];
+    if (!ehNivel(nivel)) {
+      continue;
+    }
+
+    const peso = Math.max(1, Math.trunc(criterio.peso || 1));
+    soma += NIVEIS[nivel].pontos * peso;
+    pesos += peso;
+  }
+
+  return pesos > 0 ? arredondarComoPhp((soma * (NOTA_MAXIMA / 100)) / pesos) : 0;
 }
 
-export function criteriosMarcados(niveis: Partial<Niveis> | null): number {
-  return niveis ? CHAVES_CRITERIOS.filter((criterio) => niveis[criterio]).length : 0;
+/** round() do PHP: meio arredonda para longe do zero (o Math.round do JS sobe 2,5 e -2,5 para cima). */
+function arredondarComoPhp(valor: number): number {
+  return Math.sign(valor) * Math.round(Math.abs(valor));
+}
+
+export function criteriosMarcados(niveis: Niveis | null, criterios: Criterio[]): number {
+  return niveis ? criterios.filter((criterio) => ehNivel(niveis[criterio.chave])).length : 0;
 }
 
 export function situacaoDe(avaliacao: Avaliacao | null): Situacao {
@@ -133,13 +148,9 @@ export function situacaoDe(avaliacao: Avaliacao | null): Situacao {
   return avaliacao.status === 'finalizada' ? 'avaliado' : 'em_avaliacao';
 }
 
-/**
- * A menção que uma quantidade de pontos representa, como Avaliacao::mencao()
- * no site: a soma de uma ficha (máximo NOTA_MAXIMA) ou, numa ficha pela
- * metade, só dos critérios já marcados (máximo marcados × 100).
- */
-export function mencao(pontosDaFicha: number, maximo: number = NOTA_MAXIMA): Nivel {
-  const porcentagem = maximo > 0 ? (pontosDaFicha * 100) / maximo : 0;
+/** A menção que uma nota representa, como Avaliacao::mencao() no site. */
+export function mencao(nota: number, maximo: number = NOTA_MAXIMA): Nivel {
+  const porcentagem = maximo > 0 ? (nota * 100) / maximo : 0;
 
   if (porcentagem >= FAIXA_ATENDIDO) {
     return 'otimo';
@@ -152,14 +163,26 @@ export function mencao(pontosDaFicha: number, maximo: number = NOTA_MAXIMA): Niv
  * A menção da ficha como está agora: com todos os critérios, a final; pela
  * metade, a parcial, contando só os marcados. null sem nenhum marcado.
  */
-export function mencaoDaFicha(niveis: Partial<Niveis> | null): Nivel | null {
-  const marcados = criteriosMarcados(niveis);
-  return marcados > 0 ? mencao(pontos(niveis), marcados * 100) : null;
+export function mencaoDaFicha(niveis: Niveis | null, criterios: Criterio[]): Nivel | null {
+  return criteriosMarcados(niveis, criterios) > 0 ? mencao(pontos(niveis, criterios)) : null;
 }
 
 /** "A (Atendido)", como nas mensagens do site. */
 export function descreverMencao(nivel: Nivel): string {
   return `${NIVEIS[nivel].sigla} (${NIVEIS[nivel].rotulo})`;
+}
+
+/** Só as menções dos critérios desta ficha, e só as válidas. */
+export function limparNiveis(niveis: Record<string, unknown> | null | undefined, criterios: Criterio[]): Niveis {
+  const limpos: Niveis = {};
+  for (const criterio of criterios) {
+    const nivel = niveis?.[criterio.chave];
+    if (ehNivel(nivel)) {
+      limpos[criterio.chave] = nivel;
+    }
+  }
+
+  return limpos;
 }
 
 /**

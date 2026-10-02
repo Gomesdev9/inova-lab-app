@@ -2,15 +2,15 @@ import { addNetworkStateListener, getNetworkStateAsync, type NetworkState } from
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
-import { ErroDeEmail, baixarPacote, type Pacote } from '@/api/cliente';
+import { baixarPacote, type Avaliador, type Pacote } from '@/api/cliente';
 import pacoteDoApk from '@/dados/pacote-inicial.json';
 import type { Niveis } from '@/lib/avaliacao';
 import {
   dispensarAviso,
-  gravarEmail,
+  escolherAvaliador,
   guardarPacote,
   lerDados,
-  liberarTablet,
+  liberarParaOutro,
   marcarEnvioPedido,
   type DadosDoTablet,
 } from '@/offline/armazem';
@@ -22,19 +22,19 @@ type Aviso = { tipo: 'sucesso' | 'erro'; mensagem: string };
 type Estado = DadosDoTablet & {
   /** O banco do tablet já foi lido. */
   pronto: boolean;
-  /** Todos os grupos da fila estão finalizados. */
+  /** Quem está com o tablet já finalizou todos os grupos da fila dele. */
   todasAvaliadas: boolean;
+  /** Finalizadas de todos os avaliadores que ainda não chegaram ao servidor. */
+  prontasNoTablet: number;
   online: boolean;
   enviando: boolean;
-  /** Por que o último envio falhou, até o próximo dar certo. */
+  /** Por que o último envio falhou (rede, servidor), até o próximo dar certo. */
   falha: string | null;
-  /** A falha foi o e-mail: o servidor não conhece. O avaliador precisa corrigir. */
-  falhaDeEmail: boolean;
-  definirEmail: (email: string) => Promise<void>;
+  escolher: (avaliador: Avaliador) => Promise<void>;
+  trocarAvaliador: () => Promise<void>;
   salvar: (uuid: string, niveis: Niveis, comentarios: string, acao: 'rascunho' | 'finalizar') => Promise<ResultadoSalvar>;
   enviarAgora: () => Promise<void>;
   atualizarProjetos: () => Promise<void>;
-  liberar: () => Promise<void>;
   dispensarAviso: (uuid: string) => Promise<void>;
   aviso: Aviso | null;
   avisar: (aviso: Aviso) => void;
@@ -46,15 +46,7 @@ const Contexto = createContext<Estado | null>(null);
 /** Enquanto houver ficha esperando e internet, tenta de novo neste intervalo. */
 const NOVA_TENTATIVA_MS = 60000;
 
-const semDados: DadosDoTablet = {
-  email: null,
-  nome: null,
-  envioPedido: false,
-  pacoteGeradoEm: null,
-  fila: [],
-  prontasParaEnviar: 0,
-  enviadas: 0,
-};
+const semDados: DadosDoTablet = { avaliadores: [], listaCompleta: false, pacoteGeradoEm: null, atual: null, fila: [], noTablet: [] };
 
 function temInternet(estado: NetworkState): boolean {
   return Boolean(estado.isConnected) && estado.isInternetReachable !== false;
@@ -64,11 +56,16 @@ function tudoAvaliado(dados: DadosDoTablet): boolean {
   return dados.fila.length > 0 && dados.fila.every((item) => item.situacao === 'avaliado');
 }
 
+const quantas = (n: number) => (n === 1 ? '1 avaliação' : `${n} avaliações`);
+
 /**
- * O app funciona a partir do que está no tablet. O servidor só entra em dois
- * momentos: para atualizar os projetos (quando há internet) e para receber as
- * avaliações — o que acontece sozinho quando o avaliador termina todos os
- * grupos, ou quando ele pede, e de novo sempre que a internet volta.
+ * O app funciona a partir do que está no tablet. O servidor só entra para
+ * atualizar os projetos (quando há internet) e para receber as avaliações.
+ *
+ * Vários avaliadores usam o mesmo tablet. As fichas de cada um vão ao servidor
+ * com o e-mail dele quando ele termina todos os grupos, quando passa o tablet
+ * adiante ou quando aperta "Enviar" — e, sem internet nessa hora, assim que a
+ * conexão voltar.
  */
 export function AvaliacaoProvider({ children }: { children: ReactNode }) {
   const [pronto, setPronto] = useState(false);
@@ -76,7 +73,6 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
   const [online, setOnline] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [falha, setFalha] = useState<string | null>(null);
-  const [falhaDeEmail, setFalhaDeEmail] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
 
   // Os ouvintes (rede, app em primeiro plano, intervalo) são registrados uma
@@ -90,44 +86,37 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * Envia se houver o que enviar e o momento chegou: o avaliador terminou
-   * todos os grupos ou já pediu o envio. `pedido` é o toque no botão.
+   * Envia as fichas de quem já pode enviar. `pedido`: o avaliador do tablet
+   * apertou o botão, então as dele vão mesmo sem ter terminado tudo.
    */
   const tentarEnviar = useCallback(
     async (pedido: boolean) => {
       const atuais = await lerDados();
-      const chegouAHora = pedido || atuais.envioPedido || tudoAvaliado(atuais);
 
-      if (!atuais.email || atuais.prontasParaEnviar === 0 || !chegouAHora) {
-        return;
+      if (atuais.atual && atuais.atual.prontas > 0 && !atuais.atual.envioPedido && (pedido || tudoAvaliado(atuais))) {
+        await marcarEnvioPedido(atuais.atual.email);
       }
 
-      if (!atuais.envioPedido) {
-        await marcarEnvioPedido();
+      if (!atuais.noTablet.some((avaliador) => avaliador.prontas > 0)) {
+        return;
       }
 
       setEnviando(true);
       try {
-        const { enviadas, comAviso, nome } = await enviar(atuais.email);
+        const { enviadas, comAviso, recusados } = await enviar((avaliador) => avaliador.envioPedido);
         setFalha(null);
-        setFalhaDeEmail(false);
 
-        if (comAviso > 0) {
-          setAviso({
-            tipo: 'erro',
-            mensagem: `${comAviso === 1 ? 'Uma avaliação voltou' : `${comAviso} avaliações voltaram`} do servidor com aviso. Confira na lista.`,
-          });
+        if (recusados.length > 0) {
+          setAviso({ tipo: 'erro', mensagem: recusados.map((recusado) => recusado.erro).join(' ') });
+        } else if (comAviso > 0) {
+          setAviso({ tipo: 'erro', mensagem: `${comAviso === 1 ? 'Uma avaliação voltou' : `${comAviso} avaliações voltaram`} do servidor com aviso. Confira na lista.` });
         } else if (enviadas > 0) {
-          setAviso({
-            tipo: 'sucesso',
-            mensagem: `${enviadas === 1 ? 'Avaliação registrada' : `${enviadas} avaliações registradas`} no nome de ${nome}.`,
-          });
+          setAviso({ tipo: 'sucesso', mensagem: `${quantas(enviadas)} ${enviadas === 1 ? 'registrada' : 'registradas'} no servidor.` });
         }
       } catch (erro) {
         const mensagem = erro instanceof Error ? erro.message : 'Não foi possível enviar.';
         setFalha(mensagem);
-        setFalhaDeEmail(erro instanceof ErroDeEmail);
-        if (pedido || erro instanceof ErroDeEmail) {
+        if (pedido) {
           setAviso({ tipo: 'erro', mensagem });
         }
       } finally {
@@ -138,25 +127,25 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
     [recarregar]
   );
 
-  /** Com internet: busca os projetos atualizados e manda o que estiver na hora. */
+  /** Com internet: busca projetos e avaliadores atualizados e manda o que estiver na hora. */
   const aproveitarInternet = useCallback(async () => {
     try {
       await guardarPacote(await baixarPacote());
       await recarregar();
     } catch {
-      // Sem servidor agora: os projetos do APK continuam valendo.
+      // Sem servidor agora: o que veio no APK continua valendo.
     }
     await tentarEnviar(false);
   }, [recarregar, tentarEnviar]);
 
-  // Abre o banco; na primeira vez, põe nele os projetos que vieram no APK.
+  // Abre o banco; na primeira vez, põe nele os projetos e avaliadores do APK.
   useEffect(() => {
     guardarPacote(pacoteDoApk as Pacote, true)
       .then(recarregar)
       .finally(() => setPronto(true));
   }, [recarregar]);
 
-  // A internet voltou: atualiza os projetos e envia o que estiver pronto.
+  // A internet voltou: atualiza o pacote e envia o que estiver pronto.
   useEffect(() => {
     const aplicar = (estado: NetworkState) => {
       const agora = temInternet(estado);
@@ -185,9 +174,10 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
   }, [tentarEnviar]);
 
   // Conectado mas sem alcançar o servidor (Wi-Fi sem internet, por exemplo):
-  // o evento de rede não vem de novo, então insiste.
+  // o evento de rede não vem de novo, então insiste enquanto houver o que mandar.
+  const haParaEnviar = dados.noTablet.some((avaliador) => avaliador.prontas > 0 && avaliador.envioPedido);
   useEffect(() => {
-    if (dados.prontasParaEnviar === 0 || !(dados.envioPedido || tudoAvaliado(dados))) {
+    if (!haParaEnviar) {
       return;
     }
 
@@ -197,24 +187,34 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
       }
     }, NOVA_TENTATIVA_MS);
     return () => clearInterval(intervalo);
-  }, [dados, tentarEnviar]);
+  }, [haParaEnviar, tentarEnviar]);
 
-  const definirEmail = useCallback(
-    async (email: string) => {
-      await gravarEmail(email);
+  const escolher = useCallback(
+    async (avaliador: Avaliador) => {
+      await escolherAvaliador(avaliador);
       setFalha(null);
-      setFalhaDeEmail(false);
       await recarregar();
-      if (onlineAtual.current) {
-        tentarEnviar(false);
-      }
     },
-    [recarregar, tentarEnviar]
+    [recarregar]
   );
+
+  // Passar o tablet adiante não apaga nada: as finalizadas de quem sai vão
+  // para o servidor agora, se houver internet, ou depois.
+  const trocarAvaliador = useCallback(async () => {
+    await liberarParaOutro();
+    await recarregar();
+    if (onlineAtual.current) {
+      tentarEnviar(false);
+    }
+  }, [recarregar, tentarEnviar]);
 
   const salvar = useCallback(
     async (uuid: string, niveis: Niveis, comentarios: string, acao: 'rascunho' | 'finalizar') => {
-      const resultado = await registrarNoAparelho(dados.fila, uuid, niveis, comentarios, acao);
+      if (!dados.atual) {
+        return { ok: false, salvo: false, mensagem: 'Escolha o seu nome antes de avaliar.' };
+      }
+
+      const resultado = await registrarNoAparelho(dados.atual.email, dados.fila, uuid, niveis, comentarios, acao);
       const atuais = await recarregar();
 
       if (resultado.salvo && tudoAvaliado(atuais)) {
@@ -226,7 +226,7 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
 
       return resultado;
     },
-    [dados.fila, recarregar, tentarEnviar]
+    [dados.atual, dados.fila, recarregar, tentarEnviar]
   );
 
   const atualizarProjetos = useCallback(async () => {
@@ -234,26 +234,21 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
       const novo = await baixarPacote();
       await guardarPacote(novo);
       await recarregar();
-      setAviso({ tipo: 'sucesso', mensagem: `Projetos atualizados: ${novo.projetos.length} na feira.` });
+      setAviso({ tipo: 'sucesso', mensagem: `Atualizado: ${novo.projetos.length} projetos e ${novo.avaliadores?.length ?? 0} avaliadores.` });
     } catch (erro) {
       setAviso({ tipo: 'erro', mensagem: erro instanceof Error ? erro.message : 'Não foi possível atualizar os projetos.' });
     }
     await tentarEnviar(false);
   }, [recarregar, tentarEnviar]);
 
-  const liberar = useCallback(async () => {
-    await liberarTablet();
-    setFalha(null);
-    setFalhaDeEmail(false);
-    await recarregar();
-  }, [recarregar]);
-
   const dispensar = useCallback(
     async (uuid: string) => {
-      await dispensarAviso(uuid);
-      await recarregar();
+      if (dados.atual) {
+        await dispensarAviso(dados.atual.email, uuid);
+        await recarregar();
+      }
     },
-    [recarregar]
+    [dados.atual, recarregar]
   );
 
   const limparAviso = useCallback(() => setAviso(null), []);
@@ -263,21 +258,21 @@ export function AvaliacaoProvider({ children }: { children: ReactNode }) {
       ...dados,
       pronto,
       todasAvaliadas: tudoAvaliado(dados),
+      prontasNoTablet: dados.noTablet.reduce((soma, avaliador) => soma + avaliador.prontas, 0),
       online,
       enviando,
       falha,
-      falhaDeEmail,
-      definirEmail,
+      escolher,
+      trocarAvaliador,
       salvar,
       enviarAgora: () => tentarEnviar(true),
       atualizarProjetos,
-      liberar,
       dispensarAviso: dispensar,
       aviso,
       avisar: setAviso,
       limparAviso,
     }),
-    [dados, pronto, online, enviando, falha, falhaDeEmail, definirEmail, salvar, tentarEnviar, atualizarProjetos, liberar, dispensar, aviso, limparAviso]
+    [dados, pronto, online, enviando, falha, escolher, trocarAvaliador, salvar, tentarEnviar, atualizarProjetos, dispensar, aviso, limparAviso]
   );
 
   return <Contexto.Provider value={valor}>{children}</Contexto.Provider>;

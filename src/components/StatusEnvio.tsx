@@ -1,5 +1,4 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { router } from 'expo-router';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import { useAvaliacao } from '@/context/AvaliacaoContext';
@@ -24,11 +23,13 @@ type Icone = 'cloud-off' | 'cloud-upload' | 'cloud-done' | 'error-outline' | 'ch
  * internet é por aqui que o avaliador sabe que pode seguir avaliando, e no
  * fim, que tudo chegou ao servidor.
  */
-export function StatusEnvio({ aoLiberar }: { aoLiberar: () => void }) {
-  const { email, nome, online, enviando, falha, falhaDeEmail, prontasParaEnviar, enviadas, todasAvaliadas, envioPedido, fila, pacoteGeradoEm, enviarAgora } =
-    useAvaliacao();
+export function StatusEnvio({ aoTrocar }: { aoTrocar: () => void }) {
+  const { atual, online, enviando, falha, todasAvaliadas, fila, pacoteGeradoEm, enviarAgora } = useAvaliacao();
   const paleta = usePaleta();
   const avaliados = fila.filter((item) => item.situacao === 'avaliado').length;
+  const prontasParaEnviar = atual?.prontas ?? 0;
+  const enviadas = atual?.enviadas ?? 0;
+  const envioPedido = atual?.envioPedido ?? false;
 
   let tom: Tom = 'neutro';
   let icone: Icone = 'edit-note';
@@ -36,16 +37,18 @@ export function StatusEnvio({ aoLiberar }: { aoLiberar: () => void }) {
   let texto: string | null = null;
   let acao: { rotulo: string; aoTocar: () => void } | null = null;
 
-  if (falhaDeEmail) {
+  if (atual?.erro) {
+    // Conta desativada ou e-mail fora do cadastro: o servidor não aceita nada
+    // no nome dele, então as avaliações ficam paradas aqui.
     tom = 'alerta';
     icone = 'error-outline';
-    titulo = 'E-mail não cadastrado';
-    texto = `${falha ?? ''} As avaliações continuam salvas no tablet.`;
-    acao = { rotulo: 'Corrigir e-mail', aoTocar: () => router.push('/identificacao') };
+    titulo = 'O servidor não aceitou este avaliador';
+    texto = `${atual.erro} As avaliações continuam salvas no tablet. Procure a coordenação da feira.`;
+    acao = { rotulo: 'Tentar de novo', aoTocar: enviarAgora };
   } else if (enviando) {
     icone = 'cloud-upload';
-    titulo = `Enviando ${quantas(prontasParaEnviar)}…`;
-    texto = 'Conferindo o e-mail no servidor.';
+    titulo = 'Enviando avaliações…';
+    texto = 'Conferindo o avaliador no servidor.';
   } else if (prontasParaEnviar > 0 && (todasAvaliadas || envioPedido)) {
     if (!online) {
       icone = 'cloud-off';
@@ -66,8 +69,8 @@ export function StatusEnvio({ aoLiberar }: { aoLiberar: () => void }) {
     tom = 'sucesso';
     icone = 'check-circle-outline';
     titulo = 'Tudo enviado!';
-    texto = `${quantas(enviadas)} ${enviadas === 1 ? 'registrada' : 'registradas'} no nome de ${nome ?? email}. O tablet pode ser liberado para o próximo avaliador.`;
-    acao = { rotulo: 'Liberar tablet', aoTocar: aoLiberar };
+    texto = `${quantas(enviadas)} ${enviadas === 1 ? 'registrada' : 'registradas'} no nome de ${atual?.nome}. O tablet pode passar para o próximo avaliador.`;
+    acao = { rotulo: 'Próximo avaliador', aoTocar: aoTrocar };
   } else {
     titulo = `${avaliados} de ${fila.length} grupos avaliados`;
     texto = online

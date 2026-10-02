@@ -21,24 +21,18 @@ import { Selo } from '@/components/Selo';
 import { Texto } from '@/components/Texto';
 import { useAvaliacao } from '@/context/AvaliacaoContext';
 import {
-  CHAVES_CRITERIOS,
   CHAVES_NIVEIS,
-  CRITERIOS,
   NIVEIS,
   PARECER_MAXIMO,
   criteriosMarcados,
   mencaoDaFicha,
-  niveisVazios,
   proximoPendente,
-  type Criterio,
   type ItemFila,
   type Nivel,
   type Niveis,
 } from '@/lib/avaliacao';
 import { CORES_MENCAO } from '@/theme/mencoes';
 import { usePaleta } from '@/theme/usePaleta';
-
-const TOTAL_CRITERIOS = CHAVES_CRITERIOS.length;
 
 function voltarParaFila() {
   if (router.canGoBack()) {
@@ -50,7 +44,7 @@ function voltarParaFila() {
 
 export default function FichaDeAvaliacao() {
   const { projeto: uuid } = useLocalSearchParams<{ projeto: string }>();
-  const { fila, pronto, email } = useAvaliacao();
+  const { fila, pronto, atual } = useAvaliacao();
   const paleta = usePaleta();
   const indice = fila.findIndex((item) => item.projeto.uuid === uuid);
 
@@ -62,7 +56,7 @@ export default function FichaDeAvaliacao() {
     );
   }
 
-  if (!email) {
+  if (!atual) {
     return <Redirect href="/identificacao" />;
   }
 
@@ -102,11 +96,12 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
   const lateral = Math.max(16, (width - 760) / 2 + 16);
   const { projeto } = item;
 
-  const [niveis, setNiveis] = useState<Niveis>(() =>
-    item.avaliacao
-      ? Object.fromEntries(CHAVES_CRITERIOS.map((criterio) => [criterio, item.avaliacao![criterio]])) as Niveis
-      : niveisVazios()
-  );
+  // Os critérios são os que o admin cadastrou para a feira deste projeto.
+  const criterios = projeto.criterios;
+  const totalCriterios = criterios.length;
+  // Quando a feira tem pesos diferentes, cada critério mostra o dele, como no site.
+  const pesosDiferentes = new Set(criterios.map((criterio) => criterio.peso)).size > 1;
+  const [niveis, setNiveis] = useState<Niveis>(() => ({ ...(item.avaliacao?.niveis ?? {}) }));
   const [comentarios, setComentarios] = useState(item.avaliacao?.comentarios ?? '');
   const [salvando, setSalvando] = useState(false);
   const [descricaoAberta, setDescricaoAberta] = useState(false);
@@ -115,10 +110,10 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
   // avaliador sai, e não o de quando o listener foi registrado.
   const alterada = useRef(false);
 
-  const marcados = criteriosMarcados(niveis);
+  const marcados = criteriosMarcados(niveis, criterios);
   // A mesma conta do site, refeita a cada toque. Parcial, conta só os
   // critérios já marcados.
-  const mencaoAtual = mencaoDaFicha(niveis);
+  const mencaoAtual = mencaoDaFicha(niveis, criterios);
   const coresMencao = CORES_MENCAO[mencaoAtual ?? 'nenhuma'];
   const jaFinalizada = item.situacao === 'avaliado';
   const travada = item.travada;
@@ -154,7 +149,7 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
     [navigation]
   );
 
-  const marcar = (criterio: Criterio, nivel: Nivel) => {
+  const marcar = (criterio: string, nivel: Nivel) => {
     alterada.current = true;
     setNiveis((atuais) => ({ ...atuais, [criterio]: nivel }));
   };
@@ -310,23 +305,36 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
             {CHAVES_NIVEIS.map((nivel) => `${NIVEIS[nivel].sigla} = ${NIVEIS[nivel].rotulo}`).join(' · ')}
           </Texto>
 
-          {CHAVES_CRITERIOS.map((criterio, posicao) => (
-            <View className={`py-stack-md gap-3 ${posicao > 0 ? 'border-t border-outline-variant' : ''} ${posicao === TOTAL_CRITERIOS - 1 ? 'pb-0' : ''}`} key={criterio}>
+          {totalCriterios === 0 && (
+            <Texto className="text-body-sm text-on-surface-variant mt-stack-md">
+              A coordenação ainda não cadastrou os critérios de avaliação desta feira. Com internet, puxe a lista de grupos para baixo para atualizar.
+            </Texto>
+          )}
+
+          {criterios.map(({ chave: criterio, titulo, descricao, peso }, posicao) => (
+            <View className={`py-stack-md gap-3 ${posicao > 0 ? 'border-t border-outline-variant' : ''} ${posicao === totalCriterios - 1 ? 'pb-0' : ''}`} key={criterio}>
               <View>
                 <View className="flex-row items-baseline gap-2">
                   <Texto peso="medium" className="text-label-sm text-outline">
                     {String(posicao + 1).padStart(2, '0')}
                   </Texto>
                   <Texto peso="medium" className="flex-1 text-label-md text-on-surface">
-                    {CRITERIOS[criterio].titulo}
+                    {titulo}
                   </Texto>
+                  {pesosDiferentes && (
+                    <View className="shrink-0 px-2 py-0.5 rounded-full bg-surface-container">
+                      <Texto peso="semibold" className="text-[11px] text-on-surface-variant">
+                        Peso {peso}
+                      </Texto>
+                    </View>
+                  )}
                 </View>
-                <Texto className="text-body-sm text-on-surface-variant mt-1">{CRITERIOS[criterio].descricao}</Texto>
+                {descricao ? <Texto className="text-body-sm text-on-surface-variant mt-1">{descricao}</Texto> : null}
               </View>
 
               {/* items-stretch: os três botões ficam da mesma altura, mesmo quando
                   "Parcialmente atendido" quebra em duas linhas. */}
-              <View accessibilityLabel={CRITERIOS[criterio].titulo} accessibilityRole="radiogroup" className="flex-row items-stretch gap-2">
+              <View accessibilityLabel={titulo} accessibilityRole="radiogroup" className="flex-row items-stretch gap-2">
                 {CHAVES_NIVEIS.map((nivel) => {
                   const marcado = niveis[criterio] === nivel;
                   return (
@@ -411,9 +419,9 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
             </View>
           </View>
           <View className="flex-1">
-            <BarraProgresso fracao={marcados / TOTAL_CRITERIOS} />
+            <BarraProgresso fracao={totalCriterios > 0 ? marcados / totalCriterios : 0} />
             <Texto className="text-label-sm text-on-surface-variant mt-1.5">
-              {marcados} de {TOTAL_CRITERIOS} critérios avaliados
+              {marcados} de {totalCriterios} critérios avaliados
             </Texto>
           </View>
         </View>
@@ -441,11 +449,11 @@ function Ficha({ item, fila, indice }: { item: ItemFila; fila: ItemFila[]; indic
             )}
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ disabled: salvando || marcados < TOTAL_CRITERIOS }}
+              accessibilityState={{ disabled: salvando || totalCriterios === 0 || marcados < totalCriterios }}
               className={`flex-1 flex-row items-center justify-center gap-2 bg-primary px-4 py-3 rounded-xl active:opacity-80 ${
-                salvando || marcados < TOTAL_CRITERIOS ? 'opacity-50' : ''
+                salvando || totalCriterios === 0 || marcados < totalCriterios ? 'opacity-50' : ''
               }`}
-              disabled={salvando || marcados < TOTAL_CRITERIOS}
+              disabled={salvando || totalCriterios === 0 || marcados < totalCriterios}
               onPress={() => salvar('finalizar')}
             >
               {salvando ? (

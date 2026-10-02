@@ -38,7 +38,7 @@ function iniciais(nome: string): string {
  * isso ela abre igual com ou sem internet.
  */
 export default function FilaDeAvaliacao() {
-  const { pronto, email, nome, fila, pacoteGeradoEm, prontasParaEnviar, online, atualizarProjetos, liberar } = useAvaliacao();
+  const { pronto, atual, fila, pacoteGeradoEm, online, atualizarProjetos, trocarAvaliador } = useAvaliacao();
   const [atualizando, setAtualizando] = useState(false);
   const [filtro, setFiltro] = useState<Filtro>('todos');
   const { top, bottom } = useSafeAreaInsets();
@@ -67,30 +67,30 @@ export default function FilaDeAvaliacao() {
     );
   }
 
-  if (!email) {
+  if (!atual) {
     return <Redirect href="/identificacao" />;
   }
 
-  // Liberar apaga as avaliações do tablet: se alguma não foi enviada, ela se perde.
-  const confirmarLiberacao = () => {
-    const rascunhos = fila.filter((item) => item.situacao === 'em_avaliacao').length;
-    const naoEnviadas = prontasParaEnviar + rascunhos;
-    const perda =
-      naoEnviadas > 0
-        ? `Atenção: ${naoEnviadas === 1 ? '1 avaliação deste tablet ainda não foi enviada e será perdida' : `${naoEnviadas} avaliações deste tablet ainda não foram enviadas e serão perdidas`}.`
-        : 'As avaliações já foram enviadas. O tablet volta para a tela do e-mail, com os mesmos projetos.';
-    const executar = () => liberar().then(() => router.replace('/identificacao'));
+  // Passar o tablet adiante não apaga nada: as avaliações deste avaliador
+  // ficam guardadas no nome dele, e as finalizadas vão para o servidor quando
+  // houver internet. Se ele voltar e escolher o nome de novo, continua de onde parou.
+  const confirmarTroca = () => {
+    const explicacao =
+      atual.rascunhos > 0
+        ? `Suas avaliações ficam guardadas no seu nome. ${atual.rascunhos === 1 ? '1 grupo está' : `${atual.rascunhos} grupos estão`} em rascunho: só as finalizadas são enviadas.`
+        : 'Suas avaliações ficam guardadas no seu nome e vão para o servidor quando houver internet.';
+    const executar = () => trocarAvaliador().then(() => router.replace('/identificacao'));
 
     if (Platform.OS === 'web') {
-      if (window.confirm(`Liberar o tablet para outro avaliador? ${perda}`)) {
+      if (window.confirm(`Passar o tablet para outro avaliador? ${explicacao}`)) {
         executar();
       }
       return;
     }
 
-    Alert.alert('Liberar para outro avaliador?', perda, [
+    Alert.alert('Passar o tablet para outro avaliador?', explicacao, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Liberar', style: naoEnviadas > 0 ? 'destructive' : 'default', onPress: executar },
+      { text: 'Passar', onPress: executar },
     ]);
   };
 
@@ -107,11 +107,11 @@ export default function FilaDeAvaliacao() {
           Avaliar grupos
         </Texto>
         <Texto className="text-body-md text-on-surface-variant mt-1">
-          Os projetos da feira, menos os grupos que você orienta. Marque os cinco critérios e finalize cada grupo.
+          Os projetos da feira, menos os grupos que você orienta. Marque todos os critérios e finalize cada grupo.
         </Texto>
       </View>
 
-      <StatusEnvio aoLiberar={confirmarLiberacao} />
+      <StatusEnvio aoTrocar={confirmarTroca} />
 
       {/* AVALIADOR */}
       <Cartao className="gap-3">
@@ -119,33 +119,25 @@ export default function FilaDeAvaliacao() {
           <Texto peso="medium" className="text-label-sm text-on-surface-variant uppercase tracking-wider">
             Avaliador
           </Texto>
-          <View className="flex-row gap-4">
-            <Pressable accessibilityRole="button" className="flex-row items-center gap-1 py-1" hitSlop={8} onPress={() => router.push('/identificacao')}>
-              <MaterialIcons color={paleta.primary} name="edit" size={16} />
-              <Texto peso="medium" className="text-label-sm text-primary">
-                Corrigir e-mail
-              </Texto>
-            </Pressable>
-            <Pressable accessibilityRole="button" className="flex-row items-center gap-1 py-1" hitSlop={8} onPress={confirmarLiberacao}>
-              <MaterialIcons color={paleta.outline} name="swap-horiz" size={16} />
-              <Texto peso="medium" className="text-label-sm text-outline">
-                Trocar avaliador
-              </Texto>
-            </Pressable>
-          </View>
+          <Pressable accessibilityRole="button" className="flex-row items-center gap-1 py-1" hitSlop={8} onPress={confirmarTroca}>
+            <MaterialIcons color={paleta.primary} name="swap-horiz" size={16} />
+            <Texto peso="medium" className="text-label-sm text-primary">
+              Trocar avaliador
+            </Texto>
+          </Pressable>
         </View>
         <View className="flex-row items-center gap-3">
           <View className="w-11 h-11 rounded-full bg-primary/10 items-center justify-center">
             <Texto peso="bold" className="text-body-md text-primary">
-              {iniciais(nome ?? email)}
+              {iniciais(atual.nome)}
             </Texto>
           </View>
           <View className="flex-1 min-w-0">
             <Texto peso="medium" className="text-label-md text-on-surface" numberOfLines={1}>
-              {nome ?? email}
+              {atual.nome}
             </Texto>
             <Texto className="text-label-sm text-outline" numberOfLines={1}>
-              {nome ? email : 'O e-mail é conferido no envio'}
+              {atual.email}
             </Texto>
           </View>
         </View>
@@ -267,11 +259,12 @@ function GrupoDaFila({ item }: { item: ItemFila }) {
             {detalhes}
           </Texto>
         )}
-        {item.pendente && (
+        {/* Rascunho já aparece no selo ("Em avaliação"); aqui só a finalizada que ainda não foi. */}
+        {item.pendente && item.situacao === 'avaliado' && (
           <View className="flex-row items-center gap-1 mt-2">
             <MaterialIcons color={paleta.secondary} name="cloud-upload" size={14} />
             <Texto peso="medium" className="text-label-sm text-secondary">
-              Salva no celular, falta enviar
+              Salva no tablet, falta enviar
             </Texto>
           </View>
         )}

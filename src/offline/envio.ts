@@ -1,64 +1,79 @@
-import { enviarAvaliacoes } from '@/api/cliente';
+import { ErroDeEmail, enviarAvaliacoes } from '@/api/cliente';
 
-import { aplicarResultado, fichasParaEnviar, gravarNome, marcarSemResposta } from './armazem';
+import { aplicarResultado, fichasParaEnviar, gravarNome, marcarSemResposta, registrarErroDoAvaliador, type EnviosDoAvaliador } from './armazem';
 
 /** Fichas por requisição. O servidor aceita até 300; menos que isso deixa cada envio curto. */
 const POR_ENVIO = 50;
 
 export type Relatorio = {
-  /** Fichas que o servidor aceitou. */
+  /** Fichas que o servidor aceitou, somando todos os avaliadores. */
   enviadas: number;
   /** Fichas que voltaram com aviso: recusada ou conflito. */
   comAviso: number;
-  /** O nome do avaliador, como está no cadastro. */
-  nome: string | null;
+  /** Avaliadores cujo e-mail o servidor recusou: as fichas deles ficaram no tablet. */
+  recusados: { email: string; erro: string }[];
 };
 
 let emAndamento: Promise<Relatorio> | null = null;
 
 /**
- * Manda as fichas finalizadas com o e-mail do avaliador. O servidor confere o
- * e-mail antes de gravar qualquer uma: se não estiver cadastrado, vem
- * ErroDeEmail e nada muda no tablet.
+ * Manda ao servidor as fichas finalizadas de cada avaliador, cada grupo com o
+ * e-mail do dono. `devemIr` decide de quem vai agora (quem terminou, quem já
+ * passou o tablet adiante, quem apertou "Enviar").
  *
- * Várias coisas pedem envio (a internet voltou, o avaliador terminou, o
- * botão); quem chega com um em andamento espera por ele em vez de começar outro.
+ * O servidor confere cada e-mail antes de gravar: se recusar um, as fichas
+ * daquele avaliador ficam no tablet e os outros seguem normalmente. Erro de
+ * rede interrompe tudo e sobe, para a próxima tentativa.
+ *
+ * Quem chega com um envio em andamento espera por ele em vez de começar outro.
  */
-export function enviar(email: string): Promise<Relatorio> {
-  emAndamento ??= executar(email).finally(() => {
+export function enviar(devemIr: (avaliador: EnviosDoAvaliador) => boolean): Promise<Relatorio> {
+  emAndamento ??= executar(devemIr).finally(() => {
     emAndamento = null;
   });
 
   return emAndamento;
 }
 
-async function executar(email: string): Promise<Relatorio> {
-  const envios = await fichasParaEnviar();
-  const relatorio: Relatorio = { enviadas: 0, comAviso: 0, nome: null };
+async function executar(devemIr: (avaliador: EnviosDoAvaliador) => boolean): Promise<Relatorio> {
+  const relatorio: Relatorio = { enviadas: 0, comAviso: 0, recusados: [] };
 
-  for (let inicio = 0; inicio < envios.length; inicio += POR_ENVIO) {
-    const lote = envios.slice(inicio, inicio + POR_ENVIO);
-    const { avaliador, resultados } = await enviarAvaliacoes(email, lote.map((envio) => envio.ficha));
-    const porProjeto = new Map(resultados.map((resultado) => [resultado.projeto_uuid, resultado]));
+  for (const avaliador of (await fichasParaEnviar()).filter(devemIr)) {
+    const { email, envios } = avaliador;
 
-    relatorio.nome = avaliador.nome;
-    await gravarNome(avaliador.nome);
+    try {
+      for (let inicio = 0; inicio < envios.length; inicio += POR_ENVIO) {
+        const lote = envios.slice(inicio, inicio + POR_ENVIO);
+        const { avaliador: conferido, resultados } = await enviarAvaliacoes(email, lote.map((envio) => envio.ficha));
+        const porProjeto = new Map(resultados.map((resultado) => [resultado.projeto_uuid, resultado]));
 
-    for (const envio of lote) {
-      const resultado = porProjeto.get(envio.ficha.projeto_uuid.toLowerCase());
+        await gravarNome(email, conferido.nome);
+        await registrarErroDoAvaliador(email, null);
 
-      if (!resultado) {
-        await marcarSemResposta(envio.ficha.projeto_uuid);
-        relatorio.comAviso++;
-        continue;
+        for (const envio of lote) {
+          const resultado = porProjeto.get(envio.ficha.projeto_uuid.toLowerCase());
+
+          if (!resultado) {
+            await marcarSemResposta(email, envio.ficha.projeto_uuid);
+            relatorio.comAviso++;
+            continue;
+          }
+
+          await aplicarResultado(email, resultado, envio);
+          if (resultado.status === 'aceita') {
+            relatorio.enviadas++;
+          } else {
+            relatorio.comAviso++;
+          }
+        }
+      }
+    } catch (erro) {
+      if (!(erro instanceof ErroDeEmail)) {
+        throw erro;
       }
 
-      await aplicarResultado(resultado, envio);
-      if (resultado.status === 'aceita') {
-        relatorio.enviadas++;
-      } else {
-        relatorio.comAviso++;
-      }
+      await registrarErroDoAvaliador(email, erro.message);
+      relatorio.recusados.push({ email, erro: erro.message });
     }
   }
 

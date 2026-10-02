@@ -11,10 +11,23 @@ import type { Niveis, Projeto } from '@/lib/avaliacao';
 const SERVIDOR = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, '') ?? '';
 const CHAVE = process.env.EXPO_PUBLIC_CHAVE_APP ?? '';
 
+/**
+ * O endereço de uma rota da API. O site atende de dois jeitos, e o .env.local
+ * diz qual:
+ * - com URLs limpas (Apache com o .htaccess valendo): "http://host/inova_lab"
+ *   → http://host/inova_lab/api/tablet/pacote
+ * - sem elas (servidor que ignora o .htaccess, como o da escola): o endereço
+ *   termina em index.php, e a rota vai em ?_route=, como os links do próprio site
+ *   → https://host/Inova-lab/public/index.php?_route=%2Fapi%2Ftablet%2Fpacote
+ */
+export function enderecoDa(caminho: string, servidor: string = SERVIDOR): string {
+  return /\.php$/i.test(servidor) ? `${servidor}?_route=${encodeURIComponent(caminho)}` : `${servidor}${caminho}`;
+}
+
 /** Não deu para falar com o servidor: sem internet, servidor fora do ar, tempo esgotado. */
 export class ErroDeRede extends Error {}
 
-/** O e-mail digitado não é de um avaliador cadastrado. Nada foi gravado. */
+/** O e-mail do avaliador não é de um professor ativo no cadastro. Nada foi gravado. */
 export class ErroDeEmail extends Error {}
 
 /** O servidor respondeu, mas com erro. */
@@ -22,9 +35,18 @@ export class ErroDoServidor extends Error {}
 
 const TEMPO_LIMITE_MS = 20000;
 
-export type Pacote = { gerado_em: string | null; projetos: Projeto[] };
+/** Um professor que pode avaliar, como vem na lista do pacote. */
+export type Avaliador = { nome: string; email: string };
 
-export type ConteudoDaFicha = Niveis & { comentarios: string };
+export type Pacote = {
+  gerado_em: string | null;
+  /** Ausente nos pacotes de antes da lista de avaliadores: aí o app pede o e-mail. */
+  avaliadores?: Avaliador[];
+  projetos: Projeto[];
+};
+
+/** As menções vão em "criterios", pela chave de cada critério da feira. */
+export type ConteudoDaFicha = { criterios: Niveis; comentarios: string };
 
 export type FichaParaEnviar = ConteudoDaFicha & {
   projeto_uuid: string;
@@ -49,7 +71,7 @@ async function chamar<T>(caminho: string, corpo?: unknown): Promise<T> {
 
   let resposta: Response;
   try {
-    resposta = await fetch(`${SERVIDOR}${caminho}`, {
+    resposta = await fetch(enderecoDa(caminho), {
       method: corpo === undefined ? 'GET' : 'POST',
       headers: {
         Accept: 'application/json',

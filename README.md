@@ -4,10 +4,13 @@ App Android para os avaliadores da feira do Inova Lab (o site fica em `C:\xampp\
 
 **Na feira não há internet.** Por isso:
 
-1. O APK já sai com os projetos da feira dentro. Instalou, está pronto para avaliar.
-2. O avaliador digita só o e-mail (sem senha) e avalia tudo no tablet.
-3. Quando ele finaliza todos os grupos, o app envia as avaliações. O servidor confere se o e-mail é de um avaliador cadastrado: se for, grava; se não, nada é gravado e o app pede para corrigir o e-mail. Sem internet naquela hora, as avaliações ficam guardadas e vão sozinhas quando a conexão voltar.
-4. Com tudo enviado, "Liberar tablet" deixa o tablet pronto para o próximo avaliador.
+1. O APK já sai com tudo da feira dentro: os projetos, os critérios de avaliação que o admin cadastrou para a feira (título, descrição e peso) e a lista de avaliadores (os professores ativos). Instalou, está pronto para avaliar.
+2. O avaliador toca no próprio nome na lista (sem senha) e avalia tudo no tablet. Os grupos que ele orienta saem da fila dele. Quem não estiver na lista pode digitar o e-mail.
+3. Cada critério recebe A, PA ou NA; a menção final é a média ponderada pelo peso de cada critério, a mesma conta do site.
+4. Vários avaliadores podem usar o mesmo tablet, um depois do outro. "Trocar avaliador" não apaga nada: as avaliações ficam guardadas no nome de cada um, e quem voltar e escolher o nome de novo continua de onde parou.
+5. As avaliações finalizadas de cada avaliador vão para o servidor, no nome dele, quando ele finaliza todos os grupos, passa o tablet adiante ou aperta "Enviar". O servidor confere se é um professor ativo: se não for, as dele ficam no tablet e as dos outros seguem. Sem internet naquela hora, tudo fica guardado e vai sozinho quando a conexão voltar.
+
+A lista de avaliadores vem do `ApiController.php` do site a partir da versão que a inclui no pacote; com um site mais antigo, o app pede o e-mail.
 
 ## Gerar o APK
 
@@ -23,6 +26,12 @@ Uma vez por máquina:
   ```
 
   O endereço é o que os tablets vão usar para enviar as avaliações depois da feira: tem que ser alcançável por eles (o site publicado, ou o IP do PC com XAMPP na mesma rede).
+
+  Servidor que não usa URLs limpas (o Apache ignora o `.htaccess`, e os links do site são `index.php?_route=...`): termine o endereço em `index.php`, e o app manda as rotas em `?_route=`. É o caso do servidor da escola:
+
+  ```ini
+  EXPO_PUBLIC_API_URL=https://caioba.pr.senac.br/Inova-lab/public/index.php
+  ```
 
 Com os projetos já enviados pelos grupos e o site no ar:
 
@@ -54,10 +63,10 @@ npm run pacote      # baixa os projetos do site para src/dados/pacote-inicial.js
 
 | Pasta | O quê |
 | ----- | ----- |
-| `src/app` | Telas: e-mail (`identificacao.tsx`), lista (`avaliacao/index.tsx`) e ficha (`avaliacao/[projeto].tsx`) |
+| `src/app` | Telas: escolha do avaliador (`identificacao.tsx`), lista de grupos (`avaliacao/index.tsx`) e ficha (`avaliacao/[projeto].tsx`) |
 | `src/api/cliente.ts` | As duas chamadas à API do site (`/api/tablet/pacote` e `/api/tablet/avaliacoes`) |
 | `src/offline` | Banco do tablet (`banco.ts`, `armazem.ts`), regras de salvar (`registrar.ts`) e envio (`envio.ts`) |
-| `src/lib/avaliacao.ts` | Critérios, menções (A / PA / NA) e o cálculo da menção final, iguais aos de `Models/Avaliacao.php` |
+| `src/lib/avaliacao.ts` | Menções (A / PA / NA) e o cálculo da menção final ponderada pelos pesos, iguais aos de `Models/Avaliacao.php` (os critérios vêm do pacote) |
 | `src/context` | Estado do app e quando enviar |
 | `scripts` | `baixar-pacote.mjs`, `gerar-apk.mjs` e o `pacote-vazio.mjs` do postinstall |
 

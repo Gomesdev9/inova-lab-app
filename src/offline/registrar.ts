@@ -1,8 +1,8 @@
 import {
-  CHAVES_CRITERIOS,
   PARECER_MAXIMO,
   criteriosMarcados,
   descreverMencao,
+  limparNiveis,
   mencao,
   pontos,
   proximoPendente,
@@ -22,15 +22,16 @@ export type ResultadoSalvar = {
 };
 
 /**
- * Salva a ficha no aparelho, com as mesmas regras e mensagens de
+ * Salva a ficha do avaliador no tablet, com as mesmas regras e mensagens de
  * RegistroAvaliacao.php no site. Precisa ser igual: no dia da feira ninguém
  * confere com o servidor, e o que o app aceitar aqui é o que vai ser enviado
  * depois. O servidor confere de novo ao receber.
  */
 export async function registrarNoAparelho(
+  email: string,
   fila: ItemFila[],
   uuid: string,
-  niveis: Niveis,
+  niveisMarcados: Niveis,
   comentariosDigitados: string,
   acao: 'rascunho' | 'finalizar'
 ): Promise<ResultadoSalvar> {
@@ -49,31 +50,38 @@ export async function registrarNoAparelho(
     };
   }
 
+  // A ficha é a da feira do projeto, como o admin cadastrou.
+  const criterios = item.projeto.criterios;
+  if (criterios.length === 0) {
+    return { ok: false, salvo: false, mensagem: 'A coordenação ainda não cadastrou os critérios de avaliação desta feira.' };
+  }
+
   const texto = comentariosDigitados.trim();
   if (texto.length > PARECER_MAXIMO) {
     return { ok: false, salvo: false, mensagem: `O parecer ficou com ${texto.length} caracteres, e o limite é ${PARECER_MAXIMO}.` };
   }
 
+  const niveis = limparNiveis(niveisMarcados, criterios);
   const comentarios = texto !== '' ? texto : null;
   const existente = item.avaliacao;
   const jaFinalizada = existente?.status === 'finalizada';
-  const faltam = CHAVES_CRITERIOS.length - criteriosMarcados(niveis);
+  const faltam = criterios.length - criteriosMarcados(niveis, criterios);
 
   // Finalizada não volta a ser rascunho: revisar continua valendo, mas
-  // sempre com os cinco critérios.
+  // sempre com todos os critérios da feira.
   const finalizar = acao === 'finalizar' || jaFinalizada;
 
-  if (!finalizar && !existente && faltam === CHAVES_CRITERIOS.length && comentarios === null) {
+  if (!finalizar && !existente && faltam === criterios.length && comentarios === null) {
     return { ok: false, salvo: false, mensagem: 'Marque ao menos um critério ou escreva o parecer antes de salvar o rascunho.' };
   }
 
   if (finalizar && faltam > 0) {
     if (jaFinalizada) {
-      return { ok: false, salvo: false, mensagem: 'Uma avaliação finalizada precisa manter os cinco critérios marcados.' };
+      return { ok: false, salvo: false, mensagem: 'Uma avaliação finalizada precisa manter todos os critérios marcados.' };
     }
 
     // O que já foi marcado não se perde porque faltou um critério.
-    await gravarFicha(uuid, { ...niveis, comentarios, status: 'rascunho' });
+    await gravarFicha(email, uuid, { niveis, comentarios, status: 'rascunho' });
     return {
       ok: false,
       salvo: true,
@@ -81,13 +89,13 @@ export async function registrarNoAparelho(
     };
   }
 
-  await gravarFicha(uuid, { ...niveis, comentarios, status: finalizar ? 'finalizada' : 'rascunho' });
+  await gravarFicha(email, uuid, { niveis, comentarios, status: finalizar ? 'finalizada' : 'rascunho' });
 
   if (!finalizar) {
     return { ok: true, salvo: true, mensagem: 'Rascunho salvo. Você pode voltar e terminar depois.' };
   }
 
-  const final = descreverMencao(mencao(pontos(niveis)));
+  const final = descreverMencao(mencao(pontos(niveis, criterios)));
 
   if (jaFinalizada) {
     return { ok: true, salvo: true, mensagem: `Avaliação atualizada. Menção ${final}.` };
