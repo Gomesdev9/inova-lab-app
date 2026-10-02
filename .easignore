@@ -1,0 +1,50 @@
+# O que NÃO sobe para o EAS Build. Com este arquivo, o EAS deixa de olhar o
+# .gitignore, então ele repete o .gitignore inteiro, com uma exceção no fim.
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files (o endereço e a chave vão pelas variáveis do EAS, ambiente "preview")
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# APKs gerados localmente
+dist-apk/
+
+# A exceção: os projetos da feira PRECISAM ir para dentro do APK. No git eles
+# não entram (nomes de alunos), mas aqui sobem para o build. Fica por último
+# para valer sobre qualquer regra acima.
+!src/dados/pacote-inicial.json

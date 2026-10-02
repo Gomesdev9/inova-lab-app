@@ -41,7 +41,8 @@
     "lint": "expo lint",
     "postinstall": "node scripts/pacote-vazio.mjs",
     "pacote": "node --env-file=.env.local scripts/baixar-pacote.mjs",
-    "apk": "node --env-file=.env.local scripts/gerar-apk.mjs"
+    "apk": "node --env-file=.env.local scripts/gerar-apk-eas.mjs",
+    "apk:local": "node --env-file=.env.local scripts/gerar-apk.mjs"
   },
   "private": true
 }

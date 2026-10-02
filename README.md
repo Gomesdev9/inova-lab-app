@@ -14,11 +14,12 @@ A lista de avaliadores vem do `ApiController.php` do site a partir da versão qu
 
 ## Gerar o APK
 
-Uma vez por máquina:
+O APK é montado no **EAS Build**, o serviço da Expo na nuvem. No Windows, montar no próprio PC esbarra no limite de 260 caracteres de caminho (a biblioteca `react-native-gesture-handler` gera arquivos com caminhos longos demais).
 
-- Android Studio instalado (com o SDK) e `ANDROID_HOME` configurado.
+Uma vez só (já feito para a conta `joaogomes9`):
+
 - No site: `APP_CHAVE_TABLETS` preenchida no `.env`.
-- Neste projeto: `.env.local` com o endereço do site e a mesma chave:
+- Neste projeto: `.env.local` com o endereço do site e a mesma chave (usado por `npm run pacote` e pelo Expo Go):
 
   ```ini
   EXPO_PUBLIC_API_URL=http://192.168.0.10/inova_lab
@@ -33,6 +34,15 @@ Uma vez por máquina:
   EXPO_PUBLIC_API_URL=https://caioba.pr.senac.br/Inova-lab/public/index.php
   ```
 
+- No EAS: o mesmo endereço e a mesma chave como variáveis do ambiente `preview`, porque o `.env.local` não sobe para a nuvem:
+
+  ```bash
+  npx eas-cli@latest env:set preview --name EXPO_PUBLIC_API_URL --value "https://caioba.pr.senac.br/Inova-lab/public/index.php" --visibility plaintext
+  npx eas-cli@latest env:set preview --name EXPO_PUBLIC_CHAVE_APP --value "a-mesma-de-APP_CHAVE_TABLETS" --visibility sensitive
+  ```
+
+  Trocou a chave ou o endereço? Atualize nos dois lugares (`.env.local` e EAS). Para conferir: `npx eas-cli@latest env:list preview`.
+
 Com os projetos já enviados pelos grupos e o site no ar:
 
 ```bash
@@ -40,13 +50,19 @@ npm install
 npm run apk
 ```
 
-O script baixa os projetos, compila e deixa o APK em `dist-apk/`. Para instalar num tablet ligado no USB (com depuração USB ativada):
+O script baixa os projetos, critérios e avaliadores do site para `src/dados/pacote-inicial.json` e manda o projeto para o EAS (perfil `preview` do `eas.json`, que gera `.apk`). Em 10 a 20 minutos aparece o link (e um QR code) para baixar o APK; ele também fica em expo.dev, no projeto, em **Builds**.
+
+O pacote não vai para o git (tem nomes de alunos), mas sobe para o EAS por causa da exceção no `.easignore`; o `.env.local` não sobe.
+
+Para instalar num tablet ligado no USB (com depuração USB ativada):
 
 ```bash
-adb install -r dist-apk/inova-lab-avaliacao-AAAA-MM-DD.apk
+adb install -r inova-lab-avaliacao.apk
 ```
 
 Ou copie o arquivo para o tablet e abra (é preciso permitir "instalar apps de fontes desconhecidas").
+
+Numa máquina sem o limite de caminho (Linux, macOS), dá para montar no próprio computador com `npm run apk:local`, que deixa o APK em `dist-apk/` (precisa do Android Studio com o SDK).
 
 Se um grupo enviar o projeto depois de o APK ser gerado, não precisa gerar de novo: com internet, o tablet atualiza os projetos sozinho ao abrir (ou puxando a lista para baixo).
 
@@ -68,7 +84,7 @@ npm run pacote      # baixa os projetos do site para src/dados/pacote-inicial.js
 | `src/offline` | Banco do tablet (`banco.ts`, `armazem.ts`), regras de salvar (`registrar.ts`) e envio (`envio.ts`) |
 | `src/lib/avaliacao.ts` | Menções (A / PA / NA) e o cálculo da menção final ponderada pelos pesos, iguais aos de `Models/Avaliacao.php` (os critérios vêm do pacote) |
 | `src/context` | Estado do app e quando enviar |
-| `scripts` | `baixar-pacote.mjs`, `gerar-apk.mjs` e o `pacote-vazio.mjs` do postinstall |
+| `scripts` | `baixar-pacote.mjs`, `gerar-apk-eas.mjs` (`npm run apk`), `gerar-apk.mjs` (`npm run apk:local`) e o `pacote-vazio.mjs` do postinstall |
 
 As regras de salvar a ficha em `src/offline/registrar.ts` repetem as de `Services/RegistroAvaliacao.php` no site: mudou uma, mude a outra.
 

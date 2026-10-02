@@ -41,7 +41,9 @@ export async function baixarPacote() {
     console.warn('Atenção: nenhum projeto enviado numa feira em andamento. O APK sairia sem nada para avaliar.');
   }
   if (!Array.isArray(dados.avaliadores)) {
-    console.warn('Atenção: o site não mandou a lista de avaliadores (versão antiga do ApiController.php). No tablet, cada um vai ter que digitar o e-mail.');
+    console.warn(
+      'Atenção: o site não mandou a lista de avaliadores (versão antiga do ApiController.php). O tablet mostra só os orientadores dos projetos; quem não estiver na lista digita o e-mail.'
+    );
   }
   const semCriterios = dados.projetos.filter((projeto) => !Array.isArray(projeto.criterios) || projeto.criterios.length === 0);
   if (semCriterios.length > 0) {
